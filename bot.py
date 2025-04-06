@@ -75,7 +75,7 @@ async def send_notifications():
     print(f"현재 시간: {now_korea.hour}:{now_korea.minute}")  # 현재 시간 출력
 
     # 매일 7시 20분에 수업 알림
-    if now_korea.hour == 19 and now_korea.minute == 40:
+    if now_korea.hour == 19 and now_korea.minute == 44:
         guild = bot.get_guild(GUILD_ID_2)  # 수강생 공지를 보낼 서버의 ID
         announcement_channel = discord.utils.get(guild.text_channels, name="공지")  # "공지" 채널 이름
         study_role = discord.utils.get(guild.roles, name="수강생")  # "수강생" 역할 찾기
