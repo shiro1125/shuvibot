@@ -13,7 +13,7 @@ korea = pytz.timezone('Asia/Seoul')
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')  # 동일한 봇의 토큰
-GUILD_ID_2 = 123456789012345678  # 두 번째 서버의 ID
+GUILD_ID_2 = 1242686555982663691  # 두 번째 서버의 ID
 
 intents = discord.Intents.default()
 intents.guilds = True
