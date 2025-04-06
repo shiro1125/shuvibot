@@ -74,15 +74,22 @@ async def send_notifications():
     now_korea = datetime.now(korea)
     print(f"현재 시간: {now_korea.hour}:{now_korea.minute}")  # 현재 시간 출력
 
-    # 매일 7시 20분에 수업 알림
-    if now_korea.hour == 19 and now_korea.minute == 47:
+    # 매주 토요일 5시 50분에 알림
+    if now_korea.weekday() == 5 and now_korea.hour == 17 and now_korea.minute == 50:  # 5:50 PM
+        month = now_korea.month
+        week_number = (now_korea.day - 1) // 7 + 1  # 주차 계산
+
         guild = bot.get_guild(GUILD_ID_2)  # 수강생 공지를 보낼 서버의 ID
         announcement_channel = discord.utils.get(guild.text_channels, name="공지")  # "공지" 채널 이름
         study_role = discord.utils.get(guild.roles, name="수강생")  # "수강생" 역할 찾기
         
         if announcement_channel and study_role:
-            await announcement_channel.send(f"{study_role.mention} 📢 주간 수업 알림입니다!")  # 역할만 멘션
-            print("📢 수업 알림 메시지를 보냈습니다.")
+            if week_number == 5:  # 5주차인 경우
+                await announcement_channel.send("이번주는 휴강입니다.")  # 휴강 메시지 (멘션 없음)
+            else:
+                await announcement_channel.send(f"{study_role.mention} 📢 수업 10분전 입니다!")  # 수업 알림 메시지
+            print("📢 알림 메시지를 보냈습니다.")
+
 
 
 if __name__ == '__main__':
