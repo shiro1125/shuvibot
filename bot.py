@@ -62,7 +62,7 @@ async def control_voice_channel():
     await channel.set_permissions(everyone, connect=False)
 
     # 오후 6시 ~ 오후 9시 → '스터디' 역할 입장 허용
-    if time(11, 0) <= now <= time(16, 0):  # 한국 시간 오후 6시 ~ 9시 (EST 기준)
+    if time(10, 37) <= now <= time(16, 0):  # 한국 시간 오후 6시 ~ 9시 (EST 기준)
         await channel.set_permissions(study_role, connect=True)
         print("🟢 '스터디' 역할 입장 허용")
     else:
