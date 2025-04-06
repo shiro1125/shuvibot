@@ -9,9 +9,8 @@ import pytz
 # 동부 표준시 (EST/EDT) 시간대 설정
 eastern = pytz.timezone('America/New_York')
 
-# 현재 시간 가져오기
-now = datetime.now(eastern)
-print(f"현재 시간 (EST/EDT): {now.strftime('%Y-%m-%d %H:%M:%S')}")
+# 한국 시간대 설정
+korea = pytz.timezone('Asia/Seoul')
 
 # .env 파일에서 환경변수 불러오기
 load_dotenv()
@@ -41,8 +40,8 @@ async def on_ready():
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
-    eastern = pytz.timezone('America/New_York')
-    now = datetime.now(eastern).time()  # 여기를 수정했습니다.
+    now_est = datetime.now(eastern).time()  # EDT 기준 현재 시간 가져오기
+    now_korea = datetime.now(korea).strftime('%Y-%m-%d %H:%M:%S')  # KST 기준 현재 시간 가져오기
     
     guild = bot.get_guild(GUILD_ID)
     channel = guild.get_channel(VOICE_CHANNEL_ID)
@@ -61,8 +60,8 @@ async def control_voice_channel():
     # 항상 @everyone은 입장 불가
     await channel.set_permissions(everyone, connect=False)
 
-    # 오후 6시 ~ 오후 9시 → '스터디' 역할 입장 허용
-    if time(7, 0) <= now <= time(16, 0):  # 한국 시간 오후 6시 ~ 9시 (EST 기준)
+    # 한국 시간 기준으로 오후 6시 ~ 9시 (EDT 기준으로 오전 3시 ~ 6시)
+    if time(3, 0) <= datetime.now(korea).time() <= time(21, 0):  # KST 기준
         await channel.set_permissions(study_role, connect=True)
         print("🟢 '스터디' 역할 입장 허용")
     else:
