@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, time
 from dotenv import load_dotenv
 import os
+from flask import Flask
 
 # .env 파일에서 환경변수 불러오기
 load_dotenv()
@@ -14,8 +15,16 @@ VOICE_CHANNEL_ID = 1358176930725236968
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
+intents.message_content = True  # 메시지 콘텐츠 인텐트 활성화
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Flask 애플리케이션 설정
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return 'OK', 200
 
 @bot.event
 async def on_ready():
@@ -49,5 +58,11 @@ async def control_voice_channel():
     else:
         await channel.set_permissions(study_role, connect=False)
         print("🔴 '스터디' 역할 입장 차단")
+
+if __name__ == '__main__':
+    # Flask 애플리케이션을 별도의 스레드에서 실행
+    from threading import Thread
+    Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}).start()
+    
 
 bot.run(TOKEN)
