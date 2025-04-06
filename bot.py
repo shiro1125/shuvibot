@@ -75,15 +75,15 @@ async def send_notifications():
     print(f"현재 시간: {now_korea.hour}:{now_korea.minute}")  # 현재 시간 출력
 
     # 매일 7시 20분에 수업 알림
-    if now_korea.hour == 19 and now_korea.minute == 44:
+    if now_korea.hour == 19 and now_korea.minute == 47:
         guild = bot.get_guild(GUILD_ID_2)  # 수강생 공지를 보낼 서버의 ID
         announcement_channel = discord.utils.get(guild.text_channels, name="공지")  # "공지" 채널 이름
         study_role = discord.utils.get(guild.roles, name="수강생")  # "수강생" 역할 찾기
         
         if announcement_channel and study_role:
-            mention_string = ' '.join([member.mention for member in study_role.members])  # 멘션 문자열 생성
-            await announcement_channel.send(f"{mention_string} 📢 주간 수업 알림입니다!")  # 수업 알림 메시지
+            await announcement_channel.send(f"{study_role.mention} 📢 주간 수업 알림입니다!")  # 역할만 멘션
             print("📢 수업 알림 메시지를 보냈습니다.")
+
 
 if __name__ == '__main__':
     # Flask 애플리케이션을 별도의 스레드에서 실행
