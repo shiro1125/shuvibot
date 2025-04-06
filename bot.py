@@ -15,7 +15,7 @@ load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')  # 동일한 봇의 토큰
 GUILD_ID_1 = 1228372760212930652  # 첫 번째 서버의 ID (스터디 기능)
-GUILD_ID_2 = 1242686555982663691  # 두 번째 서버의 ID (공지 기능)
+GUILD_ID_2 = 1170313139225640972  # 두 번째 서버의 ID (공지 기능)
 VOICE_CHANNEL_ID = 1358176930725236968  # 음성 채널 ID
 
 intents = discord.Intents.default()
@@ -80,7 +80,8 @@ async def send_notifications():
         week_number = (now_korea.day - 1) // 7 + 1  # 주차 계산
 
         guild = bot.get_guild(GUILD_ID_2)  # 수강생 공지를 보낼 서버의 ID
-        announcement_channel = discord.utils.get(guild.text_channels, name="공지")  # "공지" 채널 이름
+        announcement_channel_id = 1358394433665634454  # 공지 채널의 ID로 수정
+        announcement_channel = guild.get_channel(announcement_channel_id)  # 채널 ID로 찾기
         study_role = discord.utils.get(guild.roles, name="수강생")  # "수강생" 역할 찾기
         
         if announcement_channel and study_role:
