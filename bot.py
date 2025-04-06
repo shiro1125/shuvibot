@@ -40,7 +40,6 @@ async def on_ready():
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
-    now_est = datetime.now(eastern).time()  # EDT 기준 현재 시간 가져오기
     now_korea = datetime.now(korea).strftime('%Y-%m-%d %H:%M:%S')  # KST 기준 현재 시간 가져오기
     
     guild = bot.get_guild(GUILD_ID)
@@ -63,9 +62,11 @@ async def control_voice_channel():
     # 한국 시간 기준으로 오후 6시 ~ 9시
     if time(18, 0) <= datetime.now(korea).time() <= time(21, 0):  # KST 기준
         await channel.set_permissions(study_role, connect=True)
+        await channel.edit(name="🟢 스터디")  # 음성 채팅 방 제목 변경
         print(f"🟢 '스터디' 역할 입장 허용 (현재 한국 시간: {now_korea})")
     else:
         await channel.set_permissions(study_role, connect=False)
+        await channel.edit(name="🔴 스터디")  # 음성 채팅 방 제목 변경
         print(f"🔴 '스터디' 역할 입장 차단 (현재 한국 시간: {now_korea})")
 
 if __name__ == '__main__':
