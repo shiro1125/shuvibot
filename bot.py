@@ -25,6 +25,37 @@ intents.message_content = True  # 메시지 콘텐츠 인텐트 활성화
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+@bot.command()
+async def 입장(ctx):
+    # 명령어를 친 사람이 음성 채널에 있는지 확인
+    if ctx.author.voice:
+        channel = ctx.author.voice.channel
+        # 봇이 이미 다른 곳에 연결되어 있다면 이동, 아니면 접속
+        if ctx.voice_client is not None:
+            await ctx.voice_client.move_to(channel)
+        else:
+            await channel.connect()
+        await ctx.send(f"✅ {channel.name} 채널에 입장했습니다!")
+    else:
+        # 사용자가 음성 채널에 없을 경우, 특정 ID의 채널로 입장 시도
+        guild = bot.get_guild(GUILD_ID_1)
+        channel = guild.get_channel(VOICE_CHANNEL_ID)
+        if channel:
+            await channel.connect()
+            await ctx.send(f"✅ 설정된 스터디 채널({channel.name})에 입장했습니다!")
+        else:
+            await ctx.send("⚠️ 먼저 음성 채널에 들어가 있거나, 채널 ID를 확인해주세요.")
+
+@bot.command()
+async def 퇴장(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("👋 음성 채널에서 퇴장했습니다.")
+    else:
+        await ctx.send("❌ 봇이 음성 채널에 있지 않습니다.")
+
+
+
 # Flask 애플리케이션 설정
 app = Flask(__name__)
 
