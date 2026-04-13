@@ -25,7 +25,7 @@ client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options={'api_version': 'v1'}
 )
-MODEL_ID = "gemini-3-flash"
+MODEL_ID = "models/gemini-3-flash"
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -74,7 +74,7 @@ async def on_message(message):
                     await message.reply(response.text)
         except Exception as e:
             print(f"❌ Gemini 에러: {e}")
-            await message.reply(f"미안뜌비! 에러가 났어: {e}")
+            await message.reply(f"미안! 에러가 났어: {e}")
     
     await bot.process_commands(message)
 
