@@ -4,6 +4,7 @@ from discord import app_commands
 from datetime import datetime, time
 import os
 import pytz
+import asyncio
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
@@ -20,14 +21,21 @@ GUILD_ID_2 = 1170313139225640972
 STUDY_CHANNEL_ID = 1358176930725236968
 WORK_CHANNEL_ID = 1296431232045027369
 
-# 1. 다시 v1beta 통로로 돌아갑니다 (슈비님 계정 맞춤형)
+# 1. API 설정 (v1beta 통로 사용)
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options={'api_version': 'v1beta'} # 다시 beta로 변경
+    http_options={'api_version': 'v1beta'}
 )
 
-# 이름을 리스트에 있던 가장 안정적인 'gemini-2-flash'로 변경합니다.
-MODEL_ID = "models/gemini-3-flash-preview"
+# 2. 슈비님 리스트 기반 무한 동력 모델 리스트
+MODEL_LIST = [
+    "models/gemini-3.1-pro-preview",
+    "models/gemini-3-flash-preview",
+    "models/gemini-2.5-pro",
+    "models/gemini-2.5-flash",
+    "models/gemini-2.0-flash",
+    "models/gemini-flash-latest"
+]
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -48,98 +56,63 @@ app = Flask(__name__)
 @app.route('/')
 def health_check():
     return 'OK', 200
+
 @bot.event
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
     
+    # 현재 사용 가능한 모델 리스트 출력 (확인용)
     print("\n" + "="*50)
-    print("🔍 [최종 확인] 슈비님 계정 모델 본명 리스트")
-    try:
-        # 조건 없이 모든 모델의 이름을 출력합니다.
-        models = client.models.list()
-        for m in models:
-            print(f"👉 {m.name}") # m.name만 출력해서 에러 소지를 없앴습니다.
-    except Exception as e:
-        print(f"❌ 목록 출력 실패: {e}")
+    print("🔍 [확인] 현재 활성화된 모델 풀")
+    for m in MODEL_LIST:
+        print(f"👉 {m}")
     print("="*50 + "\n")
 
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
         send_notifications.start()
-# --- Gemini 대화 (on_message) ---
+
+# --- [핵심] Gemini 돌려막기 및 커스텀 에러 대화 로직 ---
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
-        try:
-            async with message.channel.typing():
-                response = client.models.generate_content(
-                    model=MODEL_ID,
-                    contents=message.content
-                )
-                if response and response.text:
-                    await message.reply(response.text)
-        except Exception as e:
-            error_msg = str(e)
-            # 429 에러(한도 초과)인지 확인합니다.
-            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                await message.reply("미안! 오늘 나랑 너무 많이 대화해서 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
-            # 404 에러(모델 이름 오류)인지 확인합니다.
-            elif "404" in error_msg or "NOT_FOUND" in error_msg:
-                await message.reply("모델 이름을 못 찾겠어. 코드를 다시 확인해줘!")
-            # 그 외 기타 에러
-            else:
-                print(f"❌ Gemini 에러: {e}")
-                await message.reply(f"잠시 문제가 생겼어! 나중에 다시 시도해줘.")
+        async with message.channel.typing():
+            success = False
+            last_error = ""
+
+            # 리스트에 있는 모델들을 하나씩 시도합니다.
+            for model_name in MODEL_LIST:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=message.content
+                    )
+                    if response and response.text:
+                        await message.reply(response.text)
+                        success = True
+                        break  # 성공하면 루프 탈출
+                except Exception as e:
+                    last_error = str(e).upper()
+                    print(f"⚠️ {model_name} 실패, 다음 모델 시도... ({e})")
+                    continue  # 다음 모델로 넘어가기
+
+            # 모든 모델이 실패했을 경우의 처리
+            if not success:
+                if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
+                    await message.reply("미안뜌비! 오늘 준비한 모든 모델의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
+                elif any(x in last_error for x in ["404", "NOT_FOUND"]):
+                    await message.reply("뜌비... 모델 이름을 못 찾겠어. 리스트 설정을 확인해줘!")
+                else:
+                    print(f"❌ Gemini 최종 에러: {last_error}")
+                    await message.reply("잠시 문제가 생겼어! 나중에 다시 시도해줘. 뜌비!")
     
     await bot.process_commands(message)
 
-# --- 슬래시 명령어 정의 ---
-
-@bot.tree.command(name="자동입장", description="봇의 음성 채널 자동 재접속 기능을 켜거나 끕니다.")
-@app_commands.choices(상태=[
-    app_commands.Choice(name="켜기 (On)", value="on"),
-    app_commands.Choice(name="끄기 (Off)", value="off")
-])
-async def 자동입장(interaction: discord.Interaction, 상태: str):
-    if 상태 == "on":
-        bot.auto_join_enabled = True
-        await interaction.response.send_message("✅ 이제부터 봇이 작업방에 자동으로 입장합니다.")
-    else:
-        bot.auto_join_enabled = False
-        if interaction.guild.voice_client:
-            await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("❌ 자동 입장 기능을 껐습니다.")
-
-@bot.tree.command(name="입장", description="봇을 현재 채널이나 작업방으로 부릅니다.")
-async def 입장(interaction: discord.Interaction):
-    if interaction.user.voice:
-        channel = interaction.user.voice.channel
-    else:
-        guild = bot.get_guild(GUILD_ID_1)
-        channel = guild.get_channel(WORK_CHANNEL_ID)
-    
-    if channel:
-        if interaction.guild.voice_client:
-            await interaction.guild.voice_client.move_to(channel)
-        else:
-            await channel.connect()
-        await interaction.response.send_message(f"✅ {channel.name} 채널에 입장했습니다!")
-    else:
-        await interaction.response.send_message("⚠️ 채널을 찾을 수 없습니다.")
-
-@bot.tree.command(name="퇴장", description="봇을 음성 채널에서 내보냅니다.")
-async def 퇴장(interaction: discord.Interaction):
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("👋 퇴장했습니다.")
-    else:
-        await interaction.response.send_message("❌ 음성 채널에 있지 않습니다.")
-
-# --- 매 분마다 실행되는 루프 기능 ---
+# --- 음성 및 알림 루프 (안정화 버전) ---
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
@@ -149,23 +122,23 @@ async def control_voice_channel():
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
         if work_channel:
-            # 1. 봇의 현재 음성 상태(voice_client)를 가져옵니다.
             voice = guild.voice_client
             
-            # 2. 연결이 '아예 없거나' 혹은 '연결이 끊어진 상태'일 때만 접속 시도
+            # 연결이 없거나 끊긴 상태일 때만 접속 시도
             if voice is None or not voice.is_connected():
                 try:
-                    await work_channel.connect(reconnect=True, timeout=10)
-                    print(f"🔄 [{now_korea}] 음성 채널 연결 성공!")
+                    # 찌꺼기 연결 정리 후 접속
+                    if voice: 
+                        await voice.disconnect(force=True)
+                        await asyncio.sleep(1)
+                    
+                    await work_channel.connect(reconnect=True, timeout=15)
+                    print(f"🔄 [{now_korea}] 음성 채널 자동 연결 성공.")
                 except Exception as e:
-                    # 이미 연결되었다는 에러(Already connected)는 무시하도록 예외 처리
                     if "Already connected" not in str(e):
                         print(f"⚠️ 음성 연결 실패: {e}")
-            else:
-                # 이미 잘 연결되어 있다면 로그를 남기지 않고 그냥 넘어갑니다.
-                pass
 
-    # 2. 스터디 채널 관리
+    # 스터디 채널 관리
     study_channel = guild.get_channel(STUDY_CHANNEL_ID)
     if study_channel:
         everyone = guild.default_role
@@ -194,6 +167,51 @@ async def send_notifications():
                 await announcement_channel.send("이번주는 휴강입니다.")
             else:
                 await announcement_channel.send(f"{study_role.mention} 📢 수업 10분전 입니다!")
+
+# --- 슬래시 명령어들 ---
+@bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
+@app_commands.choices(상태=[
+    app_commands.Choice(name="켜기 (On)", value="on"),
+    app_commands.Choice(name="끄기 (Off)", value="off")
+])
+async def 자동입장(interaction: discord.Interaction, 상태: str):
+    bot.auto_join_enabled = (상태 == "on")
+    if 상태 == "off" and interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+    await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태 == 'on' else '❌ 자동 입장 비활성화'}")
+
+@bot.tree.command(name="입장", description="봇을 음성 채널로 부릅니다.")
+async def 입장(interaction: discord.Interaction):
+    channel = interaction.user.voice.channel if interaction.user.voice else bot.get_guild(GUILD_ID_1).get_channel(WORK_CHANNEL_ID)
+    if channel:
+        if interaction.guild.voice_client: await interaction.guild.voice_client.move_to(channel)
+        else: await channel.connect()
+        await interaction.response.send_message(f"✅ {channel.name} 입장!")
+    else:
+        await interaction.response.send_message("⚠️ 입장할 채널을 찾을 수 없습니다.")
+
+@bot.tree.command(name="퇴장", description="봇을 음성 채널에서 내보냅니다.")
+async def 퇴장(interaction: discord.Interaction):
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("👋 퇴장!")
+    else:
+        await interaction.response.send_message("❌ 연결된 음성 채널이 없습니다.")
+
+@bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
+async def 모델확인(interaction: discord.Interaction):
+    model_status = "🤖 **뜌비봇 모델 가동 현황**\n"
+    model_status += "---"
+    
+    for i, model in enumerate(MODEL_LIST, 1):
+        # 가장 위에 있는 모델이 현재 1순위로 시도되는 모델입니다.
+        prefix = "✅ **현재 1순위**" if i == 1 else f"{i}순위"
+        model_status += f"\n{prefix}: `{model}`"
+    
+    model_status += "\n---\n💡 *상위 모델의 한도가 다 차면 자동으로 다음 모델이 답변을 이어받습니다!*"
+    
+    await interaction.response.send_message(model_status)
+
 
 if __name__ == '__main__':
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}).start()
