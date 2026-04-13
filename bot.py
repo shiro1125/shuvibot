@@ -20,9 +20,12 @@ GUILD_ID_2 = 1170313139225640972
 STUDY_CHANNEL_ID = 1358176930725236968
 WORK_CHANNEL_ID = 1296431232045027369
 
-# Gemini 설정
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_ID = "gemini-2-flash"
+# 1. Gemini 설정 (통로를 v1으로 강제 고정하여 404 에러 방지)
+client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options={'api_version': 'v1'}
+)
+MODEL_ID = "gemini-3-flash"
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -47,7 +50,6 @@ def health_check():
 @bot.event
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
-    # 루프 시작 전 중복 체크
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
@@ -59,11 +61,11 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 멘션이나 '뜌비' 단어 포함 시
+    # 멘션이나 '뜌비' 단어 포함 시 대답
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         try:
             async with message.channel.typing():
-                # 최신 SDK 호출 방식
+                # v1 통로를 통해 Gemini 3 모델 호출
                 response = client.models.generate_content(
                     model=MODEL_ID,
                     contents=message.content
@@ -72,12 +74,12 @@ async def on_message(message):
                     await message.reply(response.text)
         except Exception as e:
             print(f"❌ Gemini 에러: {e}")
-            # 에러 발생 시 사용자에게 알림
             await message.reply(f"미안뜌비! 에러가 났어: {e}")
     
     await bot.process_commands(message)
 
-# --- 슬래시 명령어 ---
+# --- 슬래시 명령어 정의 ---
+
 @bot.tree.command(name="자동입장", description="봇의 음성 채널 자동 재접속 기능을 켜거나 끕니다.")
 @app_commands.choices(상태=[
     app_commands.Choice(name="켜기 (On)", value="on"),
@@ -118,17 +120,17 @@ async def 퇴장(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ 음성 채널에 있지 않습니다.")
 
-# --- 매 분마다 실행되는 루프 ---
+# --- 매 분마다 실행되는 루프 기능 ---
+
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
     guild = bot.get_guild(GUILD_ID_1)
     if not guild: return
     
-    # 1. 자동 입장 (이미 연결되어 있다면 패스하도록 수정)
+    # 1. 자동 입장 (중복 접속 방지 로직 유지)
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
-        # 중요: voice_client가 없을 때만 접속 시도 (무한 루프 방지)
         if work_channel and not guild.voice_client:
             try:
                 await work_channel.connect()
