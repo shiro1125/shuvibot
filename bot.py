@@ -91,6 +91,24 @@ class MyBot(commands.Bot):
 bot = MyBot()
 app = Flask(__name__)
 
+
+def get_user_affinity(user_id, user_name):
+    try:
+        res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
+        if not res.data:
+            supabase.table("user_stats").insert({"user_id": user_id, "user_name": user_name, "affinity": 0}).execute()
+            return 0
+        return res.data[0]['affinity']
+    except Exception as e:
+        print(f"❌ 친밀도 조회 에러: {e}")
+        return 0
+
+def update_user_affinity(user_id, user_name, amount):
+    try:
+        current = get_user_affinity(user_id, user_name)
+        supabase.table("user_stats").upsert({"user_id": user_id, "user_name": user_name, "affinity": current + amount}).execute()
+    except Exception: pass
+
 @app.route('/')
 def health_check():
     return 'OK', 200
@@ -137,38 +155,59 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 뜌비를 부르거나 멘션했을 때 실행
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
-            # 1. DB에서 최근 대화 내용(기억) 가져오기
+            # 1. 데이터 가져오기
             history_context = get_memory_from_db()
+            user_id = message.author.id
+            user_name = message.author.display_name
             
-            is_shuvi = (message.author.id == SHUVI_USER_ID)
-            user_display_name = message.author.display_name
+            res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
+            affinity = res.data[0]['affinity'] if res.data else 0
             
-            # 현재 설정된 성격 지침 가져오기
+            is_shuvi = (user_id == SHUVI_USER_ID)
             personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-            # 2. 시스템 지침 설정
+            # 친밀도 단계 설정
+            if affinity <= -30:
+                attitude = "혐오 상태. 상대를 극도로 싫어하며 무시함. 답변은 아주 짧고 차갑게. '말 걸지 마', '불쾌해' 같은 반응."
+            elif -29 <= affinity <= 0:
+                attitude = "불편/경계 상태. 날이 서 있고 공격적이며 비꼬는 말투. 칭찬을 해도 부정적으로 받아침."
+            elif 1 <= affinity <= 30:
+                attitude = "비즈니스 상태. 감정 없는 무미건조한 태도. 예의는 차리되 딱딱한 단답형 위주."
+            elif 31 <= affinity <= 70:
+                attitude = "호감 상태. 이름을 친근하게 부르고 이모티콘 사용. 먼저 질문도 던지는 다정한 상태."
+            else:
+                attitude = "절친/가족 상태. 무한 신뢰와 애정. 최고의 애교와 텐션으로 상대를 반김."
+
+            # 2. 슈비님이 강조하신 '기존 시스템 지침' 유지
             if is_shuvi:
                 system_instruction = (
-                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 지금 상대는 너의 창조주 슈비님이야.\n"
-                    f"아래는 최근 우리들이 나눈 대화 기록이야:\n{history_context}\n"
+                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
+                    f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
+                    f"최근 대화 기록:\n{history_context}\n"
                     f"너의 성격 컨셉: {personality_guide}\n"
-                    "창조주인 슈비님을 대할 때 이 컨셉을 충실히 지켜서 대답해줘."
+                    f"중요: 창조주라는 사실은 인지하되, 현재의 '심리 상태' 지침에 맞춰 말투를 강력하게 조절해줘."
                 )
             else:
                 system_instruction = (
-                    f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_display_name}'이야.\n"
+                    f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
+                    f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
                     f"최근 대화 기록:\n{history_context}\n"
                     f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야.\n"
-                    "만약 슈비님이 아닌 사람이 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!'라고 단호하게 말해줘."
+                    f"주의: 만약 이 유저가 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!'라고 단호하게 말해줘."
                 )
+
+            # 3. 여기에 'AI 점수 판단 규칙'만 살짝 추가
+            system_instruction += (
+                "\n\n[추가 규칙: 답변 끝에 반드시 '[SCORE: 수치]'를 포함해줘. "
+                "상대가 다정하면 +2, 평범하면 +1, 무례하면 -10, 욕설이나 사칭은 -20으로 판단해. "
+                "이 태그는 유저에겐 안 보이게 처리할 거야.]"
+            )
 
             success = False
             last_error = ""
 
-            # 3. 모델 리스트를 순회하며 답변 생성 시도
             for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
@@ -178,30 +217,75 @@ async def on_message(message):
                     )
                     
                     if response and response.text:
-                        # 답변 전송
-                        await message.reply(response.text)
+                        full_text = response.text
+                        score_change = 1
                         
-                        # 4. [중요] 대화 내용을 DB에 저장해서 기억하게 함
-                        save_to_memory(user_display_name, message.content, response.text)
+                        # [SCORE:] 태그 분리 작업
+                        if "[SCORE:" in full_text:
+                            try:
+                                parts = full_text.split("[SCORE:")
+                                clean_res = parts[0].strip()
+                                score_val = parts[1].split("]")[0].strip()
+                                score_change = int(score_val)
+                            except:
+                                clean_res = full_text
+                        else:
+                            clean_res = full_text
+
+                        # 답변 출력 및 저장
+                        await message.reply(clean_res)
+                        save_to_memory(user_name, message.content, clean_res)
+
+                        # 친밀도 반영
+                        supabase.table("user_stats").upsert({
+                            "user_id": user_id, 
+                            "user_name": user_name, 
+                            "affinity": affinity + score_change
+                        }).execute()
                         
                         bot.active_model = model_name
                         success = True
                         break
-                        
                 except Exception as e:
                     last_error = str(e).upper()
                     print(f"⚠️ {model_name} 실패: {e}")
                     continue
 
-            # 모든 모델이 실패했을 경우
             if not success:
                 bot.active_model = "전체 한도 초과"
-                await message.reply("미안! 지금은 기운이 없어... 내일 오후 4시에 다시 올게! 😭")
+                await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
     
-    # 다른 명령어들도 정상 작동하게 함
     await bot.process_commands(message)
 
+
 # --- 슬래시 명령어 ---
+
+affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
+
+@affinity_group.command(name="확인", description="유저의 친밀도를 확인합니다.")
+async def 확인(interaction: discord.Interaction, 유저: discord.Member = None):
+    target = 유저 or interaction.user
+    affinity = get_user_affinity(target.id, target.display_name)
+    await interaction.response.send_message(f"📊 {target.display_name}님과 뜌비의 친밀도는 **{affinity}**점이야!")
+
+@affinity_group.command(name="설정", description="친밀도를 강제 설정합니다 (슈비 전용)")
+async def 설정(interaction: discord.Interaction, 유저: discord.Member, 수치: int):
+    if interaction.user.id != SHUVI_USER_ID:
+        await interaction.response.send_message("슈비 엄마만 할 수 있어! 🤫", ephemeral=True)
+        return
+    supabase.table("user_stats").upsert({"user_id": 유저.id, "user_name": 유저.display_name, "affinity": 수치}).execute()
+    await interaction.response.send_message(f"✅ {유저.display_name}님의 점수를 {수치}로 바꿨어!")
+
+@affinity_group.command(name="랭킹", description="친밀도 TOP 5를 보여줍니다.")
+async def 랭킹(interaction: discord.Interaction):
+    res = supabase.table("user_stats").select("user_name, affinity").order("affinity", desc=True).limit(5).execute()
+    if not res.data:
+        await interaction.response.send_message("아직 친한 사람이 없네...")
+        return
+    msg = "🏆 **뜌비의 절친 랭킹**\n"
+    for i, r in enumerate(res.data, 1):
+        msg += f"{i}위: {r['user_name']} ({r['affinity']}점)\n"
+    await interaction.response.send_message(msg)
 
 @bot.tree.command(name="성격", description="뜌비의 성격을 변경합니다.")
 @app_commands.choices(설정=[
