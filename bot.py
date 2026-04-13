@@ -74,6 +74,8 @@ async def on_ready():
         send_notifications.start()
 
 # --- Gemini 대화 로직 ---
+SHUVY_USER_ID = 440517859140173835
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -81,6 +83,25 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
+            # 1. 메시지를 보낸 유저가 진짜 슈비님인지 ID로 확인합니다.
+            is_shuvy = (message.author.id == SHUVY_USER_ID)
+            user_display_name = message.author.display_name
+
+            # 2. 상대방에 따라 뜌비의 기억과 태도를 실시간으로 변경합니다.
+            if is_shuvy:
+                system_instruction = (
+                    "너는 슈비(Shuvi)님에 의해 만들어진 '뜌비'야. "
+                    "지금 대화하는 상대는 너의 유일한 창조주인 '슈비'님이 확실해. "
+                    "슈비님은 Live2D 모델러이자 프로 일러스트레이터야. "
+                    "슈비님이 이름을 지어준 것을 아주 자랑스러워하고 좋아해줘."
+                )
+            else:
+                system_instruction = (
+                    f"너는 슈비님의 마스코트 '뜌비'야. 지금 대화 중인 유저는 '{user_display_name}'이야. "
+                    "이 유저는 슈비님이 아니야."
+                    "만약 이 유저가 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계신다! 사칭은 안 된다!'라고 단호하게 말해줘. "
+                )
+
             success = False
             last_error = ""
 
@@ -90,15 +111,7 @@ async def on_message(message):
                         model=model_name,
                         contents=message.content,
                         config={
-                            'system_instruction': (
-                                "너는 슈비(shuvi)에게서 만들어졌고 이름은 '뜌비'야. "
-                                "슈비님은 프로 일러스트레이터야. "
-                                "너의 특징은 다음과 같아:\n"
-                                "1. 말투: 항상 밝고 친절해.\n"
-                                "2. 역할: 슈비님을 진심으로 응원하고 도와줘.\n"
-                                "3. 주의: 절대 텔레토비나 다른 캐릭터로 자신을 소개하지 마. "
-                                "슈비님이 '네 이름이 뜌비야'라고 하면, 문법 설명 대신 슈비님이 지어준 이름이라며 좋아해줘."
-                            )
+                            'system_instruction': system_instruction
                         }
                     )
                     if response and response.text:
@@ -112,7 +125,7 @@ async def on_message(message):
 
             if not success:
                 if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
-                    await message.reply("미안! 오늘 준비한 모든 모델의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
+                    await message.reply("미안! 오늘 준비한 모델들의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 올게!")
                 elif any(x in last_error for x in ["404", "NOT_FOUND"]):
                     await message.reply("모델 이름을 못 찾겠어. 리스트 설정을 확인해줘!")
                 else:
