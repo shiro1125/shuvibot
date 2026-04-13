@@ -73,11 +73,9 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 멘션이나 '뜌비' 단어 포함 시 대답
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         try:
             async with message.channel.typing():
-                # v1 통로를 통해 Gemini 3 모델 호출
                 response = client.models.generate_content(
                     model=MODEL_ID,
                     contents=message.content
@@ -85,8 +83,17 @@ async def on_message(message):
                 if response and response.text:
                     await message.reply(response.text)
         except Exception as e:
-            print(f"❌ Gemini 에러: {e}")
-            await message.reply(f"미안! 에러가 났어: {e}")
+            error_msg = str(e)
+            # 429 에러(한도 초과)인지 확인합니다.
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                await message.reply("미안! 오늘 나랑 너무 많이 대화해서 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
+            # 404 에러(모델 이름 오류)인지 확인합니다.
+            elif "404" in error_msg or "NOT_FOUND" in error_msg:
+                await message.reply("모델 이름을 못 찾겠어. 코드를 다시 확인해줘!")
+            # 그 외 기타 에러
+            else:
+                print(f"❌ Gemini 에러: {e}")
+                await message.reply(f"잠시 문제가 생겼어! 나중에 다시 시도해줘.")
     
     await bot.process_commands(message)
 
