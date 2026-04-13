@@ -27,12 +27,13 @@ client = genai.Client(
     http_options={'api_version': 'v1beta'}
 )
 
-# 2. 모델 리스트
+# 2. 모델 리스트 최적화 (슈비님 계정 활성 리스트 기반)
+# RPD 여유가 확인된 2.5 계열과 최신 3.1 계열을 적절히 배치했습니다.
 MODEL_LIST = [
+    "models/gemini-2.5-flash",
+    "models/gemini-2.5-pro",
     "models/gemini-3.1-pro-preview",
     "models/gemini-3-flash-preview",
-    "models/gemini-2.5-pro",
-    "models/gemini-2.5-flash",
     "models/gemini-2.0-flash",
     "models/gemini-flash-latest"
 ]
@@ -45,6 +46,7 @@ class MyBot(commands.Bot):
         intents.voice_states = True
         super().__init__(command_prefix='!', intents=intents)
         self.auto_join_enabled = True
+        self.active_model = "대기 중"  # 현재 정상 작동 중인 모델 저장 변수
 
     async def setup_hook(self):
         await self.tree.sync()
@@ -61,7 +63,6 @@ def health_check():
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
     
-    # 현재 사용 가능한 모델 리스트 출력
     print("\n" + "="*50)
     print("🔍 [확인] 현재 활성화된 모델 풀")
     for m in MODEL_LIST:
@@ -83,11 +84,9 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
-            # 1. 메시지를 보낸 유저가 진짜 슈비님인지 ID로 확인합니다.
             is_shuvy = (message.author.id == SHUVY_USER_ID)
             user_display_name = message.author.display_name
 
-            # 2. 상대방에 따라 뜌비의 기억과 태도를 실시간으로 변경합니다.
             if is_shuvy:
                 system_instruction = (
                     "너는 슈비(Shuvi)님에 의해 만들어진 '뜌비'야. "
@@ -105,6 +104,7 @@ async def on_message(message):
             success = False
             last_error = ""
 
+            # MODEL_LIST를 순회하며 RPD가 남아있는 모델을 자동으로 찾습니다.
             for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
@@ -116,6 +116,7 @@ async def on_message(message):
                     )
                     if response and response.text:
                         await message.reply(response.text)
+                        bot.active_model = model_name  # 답변에 성공한 모델을 활성 모델로 기록
                         success = True
                         break
                 except Exception as e:
@@ -124,6 +125,7 @@ async def on_message(message):
                     continue
 
             if not success:
+                bot.active_model = "전체 한도 초과"
                 if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
                     await message.reply("미안! 오늘 준비한 모델들의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 올게!")
                 elif any(x in last_error for x in ["404", "NOT_FOUND"]):
@@ -213,14 +215,19 @@ async def 퇴장(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ 연결된 음성 채널이 없습니다.")
 
-@bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
+@bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
     model_status = "🤖 **뜌비봇 모델 가동 현황**\n"
     model_status += "---"
     for i, model in enumerate(MODEL_LIST, 1):
-        prefix = "✅ **현재 1순위**" if i == 1 else f"{i}순위"
-        model_status += f"\n{prefix}: `{model}`"
-    model_status += "\n---\n💡 *상위 모델의 한도가 다 차면 자동으로 다음 모델이 답변을 이어받습니다!*"
+        # 현재 활성화된(응답에 성공한) 모델인 경우 강조 표시
+        if model == bot.active_model:
+            model_status += f"\n🔥 **작동 중: `{model}`**"
+        else:
+            model_status += f"\n{i}순위: `{model}`"
+            
+    model_status += f"\n---\n현재 담당 모델: `{bot.active_model}`"
+    model_status += "\n💡 *상위 모델의 한도가 다 차면 자동으로 RPD가 남은 다음 모델이 답변을 이어받습니다!*"
     await interaction.response.send_message(model_status)
 
 if __name__ == '__main__':
