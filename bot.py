@@ -48,24 +48,30 @@ app = Flask(__name__)
 @app.route('/')
 def health_check():
     return 'OK', 200
-
 @bot.event
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
-print("🔍 현재 사용 가능한 모델 목록 확인 중...")
+    
+    print("\n" + "="*50)
+    print("🔍 [실시간] 슈비님 계정 전용 모델 리스트 확인")
     try:
-        # v1beta 통로를 통해 접근 가능한 모든 모델 리스트를 가져옵니다.
+        # 모든 통로를 다 뒤져서 지금 당장 '대화' 가능한 이름만 뽑습니다.
+        available_models = []
         for model in client.models.list():
-            print(f"📌 발견된 모델: {model.name}")
+            if 'generateContent' in model.supported_methods:
+                available_models.append(model.name)
+                print(f"✅ 사용 가능: {model.name}")
+        
+        if not available_models:
+            print("⚠️ 경고: 대화 가능한 모델이 하나도 발견되지 않았습니다.")
     except Exception as e:
-        print(f"❌ 모델 목록 확인 실패: {e}")
-    # --- 여기까지 추가 ---
+        print(f"❌ 모델 목록 가져오기 실패: {e}")
+    print("="*50 + "\n")
 
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
         send_notifications.start()
-
 # --- Gemini 대화 (on_message) ---
 @bot.event
 async def on_message(message):
