@@ -5,3 +5,4 @@ Flask
 PyNaCl
 davey
 google-genai
+supabase
