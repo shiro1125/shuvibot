@@ -5,6 +5,8 @@ from datetime import datetime, time
 import os
 import pytz
 import asyncio
+import json
+import os
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
@@ -35,6 +37,7 @@ MODEL_LIST = [
     "models/gemini-2.5-flash-lite",
     "models/gemma-3-27b-it"
 ]
+
 
 # 성격별 시스템 프롬프트 정의
 PERSONALITY_PROMPTS = {
@@ -98,6 +101,34 @@ async def on_ready():
 
 # --- Gemini 대화 로직 ---
 SHUVI_USER_ID = 440517859140173835
+MEMORY_FILE = "memory.json"
+
+def load_full_memory():
+    try:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if not content: return []
+                return json.loads(content)
+    except Exception as e:
+        print(f"기억 읽기 에러: {e}")
+    return []
+
+def save_to_memory(user_name, user_msg, bot_res):
+    try:
+        memory = load_full_memory()
+        memory.append({
+            "user": user_name,
+            "message": user_msg,
+            "reply": bot_res,
+            "time": datetime.now(korea).strftime("%m-%d %H:%M")
+        })
+        if len(memory) > 30: memory = memory[-30:] # 최근 30개만 저장
+        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(memory, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"기억 저장 에러: {e}")
+
 
 @bot.event
 async def on_message(message):
@@ -106,6 +137,12 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
+
+			past_conversations = load_full_memory()
+            history_context = ""
+            for chat in past_conversations:
+                history_context += f"{chat['user']}: {chat['message']} -> 뜌비: {chat['reply']}\n"
+			
             is_shuvi = (message.author.id == SHUVI_USER_ID)
             user_display_name = message.author.display_name
             
@@ -115,12 +152,14 @@ async def on_message(message):
             if is_shuvi:
                 system_instruction = (
                     f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 지금 상대는 너의 창조주 슈비님이야. "
+					f"아래는 최근 사람들과 나눈 대화 기록이야:\n{history_context}\n"
                     f"너의 성격 컨셉: {personality_guide} "
                     "창조주인 슈비님을 대할 때 이 컨셉을 충실히 지켜서 대답해줘."
                 )
             else:
                 system_instruction = (
                     f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_display_name}'이야. "
+					f"최근 대화 기록:\n{history_context}\n"
                     f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야. "
                     "만약 슈비님이 아닌 사람이 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!' 같은 식으로 말해줘. 같은말을 반복하는것도 별로 좋진 않아."
                     "딱히 사칭을 하지 않았다면 경계하지 않아도 괜찮아. 의심하지도 말고."
@@ -138,6 +177,7 @@ async def on_message(message):
                     )
                     if response and response.text:
                         await message.reply(response.text)
+						save_to_memory(user_display_name, message.content, response.text)
                         bot.active_model = model_name
                         success = True
                         break
