@@ -30,12 +30,11 @@ client = genai.Client(
 # 2. 모델 리스트 최적화 (슈비님 계정 활성 리스트 기반)
 # RPD 여유가 확인된 2.5 계열과 최신 3.1 계열을 적절히 배치했습니다.
 MODEL_LIST = [
-    "models/gemini-2.5-flash",
-    "models/gemini-2.5-pro",
-    "models/gemini-3.1-pro-preview",
     "models/gemini-3-flash-preview",
-    "models/gemini-2.0-flash",
-    "models/gemini-flash-latest"
+    "models/gemini-2.5-flash",
+    "models/gemini-3.1-flash-lite-preview",
+    "models/gemini-2.5-flash-lite"
+    "models/gemma-3-27b-it"
 ]
 
 class MyBot(commands.Bot):
