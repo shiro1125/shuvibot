@@ -137,12 +137,11 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
-
-			past_conversations = load_full_memory()
+            past_conversations = load_full_memory()
             history_context = ""
             for chat in past_conversations:
                 history_context += f"{chat['user']}: {chat['message']} -> 뜌비: {chat['reply']}\n"
-			
+            
             is_shuvi = (message.author.id == SHUVI_USER_ID)
             user_display_name = message.author.display_name
             
@@ -152,14 +151,14 @@ async def on_message(message):
             if is_shuvi:
                 system_instruction = (
                     f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 지금 상대는 너의 창조주 슈비님이야. "
-					f"아래는 최근 사람들과 나눈 대화 기록이야:\n{history_context}\n"
+                    f"아래는 최근 사람들과 나눈 대화 기록이야:\n{history_context}\n"
                     f"너의 성격 컨셉: {personality_guide} "
                     "창조주인 슈비님을 대할 때 이 컨셉을 충실히 지켜서 대답해줘."
                 )
             else:
                 system_instruction = (
                     f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_display_name}'이야. "
-					f"최근 대화 기록:\n{history_context}\n"
+                    f"최근 대화 기록:\n{history_context}\n"
                     f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야. "
                     "만약 슈비님이 아닌 사람이 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!' 같은 식으로 말해줘. 같은말을 반복하는것도 별로 좋진 않아."
                     "딱히 사칭을 하지 않았다면 경계하지 않아도 괜찮아. 의심하지도 말고."
@@ -177,7 +176,7 @@ async def on_message(message):
                     )
                     if response and response.text:
                         await message.reply(response.text)
-						save_to_memory(user_display_name, message.content, response.text)
+                        save_to_memory(user_display_name, message.content, response.text)
                         bot.active_model = model_name
                         success = True
                         break
