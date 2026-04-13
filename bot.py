@@ -20,12 +20,14 @@ GUILD_ID_2 = 1170313139225640972
 STUDY_CHANNEL_ID = 1358176930725236968
 WORK_CHANNEL_ID = 1296431232045027369
 
-# 1. Gemini 설정 (통로를 v1으로 강제 고정하여 404 에러 방지)
+# 통로 설정은 정석인 v1으로 둡니다.
 client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options={'api_version': 'v1'}
 )
-MODEL_ID = "models/gemini-3-flash"
+
+# 이름을 리스트에 있던 가장 안정적인 'gemini-2-flash'로 변경합니다.
+MODEL_ID = "gemini-2-flash"
 
 class MyBot(commands.Bot):
     def __init__(self):
