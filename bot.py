@@ -53,19 +53,14 @@ async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
     
     print("\n" + "="*50)
-    print("🔍 [실시간] 슈비님 계정 전용 모델 리스트 확인")
+    print("🔍 [최종 확인] 슈비님 계정 모델 본명 리스트")
     try:
-        # 모든 통로를 다 뒤져서 지금 당장 '대화' 가능한 이름만 뽑습니다.
-        available_models = []
-        for model in client.models.list():
-            if 'generateContent' in model.supported_methods:
-                available_models.append(model.name)
-                print(f"✅ 사용 가능: {model.name}")
-        
-        if not available_models:
-            print("⚠️ 경고: 대화 가능한 모델이 하나도 발견되지 않았습니다.")
+        # 조건 없이 모든 모델의 이름을 출력합니다.
+        models = client.models.list()
+        for m in models:
+            print(f"👉 {m.name}") # m.name만 출력해서 에러 소지를 없앴습니다.
     except Exception as e:
-        print(f"❌ 모델 목록 가져오기 실패: {e}")
+        print(f"❌ 목록 출력 실패: {e}")
     print("="*50 + "\n")
 
     if not control_voice_channel.is_running():
