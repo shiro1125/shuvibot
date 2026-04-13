@@ -4,4 +4,4 @@ pytz
 Flask
 PyNaCl
 davey
-google-generativeai
+google-genai
