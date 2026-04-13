@@ -33,7 +33,7 @@ MODEL_LIST = [
     "models/gemini-3-flash-preview",
     "models/gemini-2.5-flash",
     "models/gemini-3.1-flash-lite-preview",
-    "models/gemini-2.5-flash-lite"
+    "models/gemini-2.5-flash-lite",
     "models/gemma-3-27b-it"
 ]
 
