@@ -153,6 +153,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # --- 슬래시 명령어 ---
+
 @bot.tree.command(name="성격", description="뜌비의 성격을 변경합니다.")
 @app_commands.choices(설정=[
     app_commands.Choice(name="기본", value="기본"),
@@ -162,13 +163,50 @@ async def on_message(message):
 ])
 async def 성격변경(interaction: discord.Interaction, 설정: app_commands.Choice[str]):
     if interaction.user.id != SHUVI_USER_ID:
-        await interaction.response.send_message("내 성격은 슈비 엄마만 바꿀 수 있어!", ephemeral=True)
+        await interaction.response.send_message("내 성격은 슈비 엄마만 바꿀 수 있어! 🤫", ephemeral=True)
         return
 
     bot.current_personality = 설정.value
     await interaction.response.send_message(f"✅ 뜌비의 성격이 **{설정.value}** 상태로 바뀌었어!")
 
-# (기존 음성 채널 및 알림 로직은 동일하게 유지)
+@bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
+@app_commands.choices(상태=[
+    app_commands.Choice(name="켜기 (On)", value="on"),
+    app_commands.Choice(name="끄기 (Off)", value="off")
+])
+async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Choice[str]):
+    # 관리자 체크
+    if interaction.user.id != SHUVI_USER_ID:
+        await interaction.response.send_message("자동 입장 설정은 슈비 엄마만 건드릴 수 있어!", ephemeral=True)
+        return
+
+    bot.auto_join_enabled = (상태.value == "on")
+    
+    # 끄기 옵션을 선택했을 때 봇이 현재 통화방에 있다면 나가게 함
+    if 상태.value == "off" and interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        
+    await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
+
+@bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
+async def 모델확인(interaction: discord.Interaction):
+    # 관리자 체크
+    if interaction.user.id != SHUVI_USER_ID:
+        await interaction.response.send_message("뜌비의 내부 상태는 슈비 엄마만 볼 수 있어! 🤫", ephemeral=True)
+        return
+
+    # 가독성을 위해 모델 리스트와 현재 상태 출력
+    model_status = "🤖 **뜌비봇 시스템 현황**\n"
+    model_status += "---"
+    model_status += f"\n🔥 현재 작동 모델: `{bot.active_model}`"
+    model_status += f"\n🎭 현재 성격 설정: **{bot.current_personality}**"
+    model_status += f"\n🎙️ 자동 입장 기능: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
+    model_status += "\n---"
+    
+    await interaction.response.send_message(model_status)
+
+# --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
+
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
@@ -195,15 +233,6 @@ async def send_notifications():
         study_role = discord.utils.get(guild.roles, name="수강생")
         if announcement_channel and study_role:
             await announcement_channel.send(f"{study_role.mention} 📢 수업 10분전 입니다!")
-
-@bot.tree.command(name="자동입장", description="자동 재접속 설정")
-async def 자동입장(interaction: discord.Interaction, 상태: str):
-    bot.auto_join_enabled = (상태 == "on")
-    await interaction.response.send_message(f"{'✅ 활성화' if 상태 == 'on' else '❌ 비활성화'}")
-
-@bot.tree.command(name="모델", description="현재 모델 상태 확인")
-async def 모델확인(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🤖 현재 작동 중인 모델: `{bot.active_model}`\n🎭 현재 성격: **{bot.current_personality}**")
 
 if __name__ == '__main__':
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}).start()
