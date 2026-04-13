@@ -22,7 +22,7 @@ WORK_CHANNEL_ID = 1296431232045027369
 
 # Gemini 설정
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_ID = "gemini-3-flash"
+MODEL_ID = "gemini-2-flash"
 
 class MyBot(commands.Bot):
     def __init__(self):
