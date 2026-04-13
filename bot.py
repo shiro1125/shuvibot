@@ -73,7 +73,80 @@ async def on_ready():
     if not send_notifications.is_running():
         send_notifications.start()
 
-# --- [핵심] Gemini 돌려막기 및 커스텀 에러 대화 로직 ---
+슈비님, 뜌비의 정체성과 말투를 확실하게 고정하고, 한도가 다 차면 자동으로 다른 모델로 넘어가는 '무한 동력 뜌비' 전체 코드를 정리해 드릴게요.
+
+이 코드는 슈비님이 80여 개의 모델을 제작한 전문가라는 점을 뜌비가 기억하게 하고, 어떤 상황에서도 귀여운 말투를 유지하도록 설계되었습니다.
+
+🛠️ 뜌비봇 최종 통합 코드 (정체성 & 돌려막기 포함)
+Python
+import discord
+from discord.ext import commands, tasks
+from discord import app_commands
+from datetime import datetime, time
+import os
+import pytz
+import asyncio
+from flask import Flask
+from threading import Thread
+from dotenv import load_dotenv
+from google import genai
+
+# 한국 시간대 설정
+korea = pytz.timezone('Asia/Seoul')
+load_dotenv()
+
+TOKEN = os.getenv('DISCORD_TOKEN')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GUILD_ID_1 = 1228372760212930652
+GUILD_ID_2 = 1170313139225640972
+STUDY_CHANNEL_ID = 1358176930725236968
+WORK_CHANNEL_ID = 1296431232045027369
+
+# 1. API 설정 (v1beta 통로 사용)
+client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options={'api_version': 'v1beta'}
+)
+
+# 2. 슈비님 리스트 기반 무한 동력 모델 리스트
+MODEL_LIST = [
+    "models/gemini-3.1-pro-preview",
+    "models/gemini-3-flash-preview",
+    "models/gemini-2.5-pro",
+    "models/gemini-2.5-flash",
+    "models/gemini-2.0-flash",
+    "models/gemini-flash-latest"
+]
+
+class MyBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.message_content = True
+        intents.voice_states = True
+        super().__init__(command_prefix='!', intents=intents)
+        self.auto_join_enabled = True
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        print("✅ 슬래시 명령어 동기화 완료!")
+
+bot = MyBot()
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return 'OK', 200
+
+@bot.event
+async def on_ready():
+    print(f'✅ 봇 로그인됨: {bot.user}')
+    if not control_voice_channel.is_running():
+        control_voice_channel.start()
+    if not send_notifications.is_running():
+        send_notifications.start()
+
+# --- [핵심] Gemini 정체성 고정 및 돌려막기 로직 ---
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -84,12 +157,22 @@ async def on_message(message):
             success = False
             last_error = ""
 
-            # 리스트에 있는 모델들을 하나씩 시도합니다.
             for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=message.content
+                        contents=message.content,
+                        # [기억 심기] 뜌비의 정체성과 슈비님의 정보를 여기에 입력합니다.
+                        config={
+                            'system_instruction': (
+                                "너의 이름은'뜌비'고 너를 만든 사람은 '슈비'야. "
+                                "슈비님은 80개 이상의 모델을 제작한 베테랑 Live2D 모델러이자 프로 일러스트레이터야. "
+                                "너의 특징은 다음과 같아:"
+                                "1. 말투: 항상 밝고 친절해."
+                                "2. 주의: 절대 텔레토비나 다른 캐릭터로 자신을 소개하지 마. "
+                                "슈비님이 '네 이름이 뜌비야'라고 하면, 문법 설명 대신 슈비님이 지어준 이름이라며 좋아해줘."
+                            )
+                        }
                     )
                     if response and response.text:
                         await message.reply(response.text)
@@ -98,20 +181,17 @@ async def on_message(message):
                 except Exception as e:
                     last_error = str(e).upper()
                     print(f"⚠️ {model_name} 실패, 다음 모델 시도... ({e})")
-                    continue  # 다음 모델로 넘어가기
+                    continue
 
-            # 모든 모델이 실패했을 경우의 처리
+            # 모든 모델 실패 시 에러 처리
             if not success:
                 if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
-                    await message.reply("미안뜌비! 오늘 준비한 모든 모델의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
-                elif any(x in last_error for x in ["404", "NOT_FOUND"]):
-                    await message.reply("뜌비... 모델 이름을 못 찾겠어. 리스트 설정을 확인해줘!")
+                    await message.reply("미안! 오늘 준비한 모든 모델의 기운이 다 빠졌어... 😭 내일 오후 4시에 다시 충전해서 올게!")
                 else:
                     print(f"❌ Gemini 최종 에러: {last_error}")
-                    await message.reply("잠시 문제가 생겼어! 나중에 다시 시도해줘. 뜌비!")
+                    await message.reply("잠시 문제가 생겼어! 나중에 다시 시도해줘.")
     
     await bot.process_commands(message)
-
 # --- 음성 및 알림 루프 (안정화 버전) ---
 @tasks.loop(minutes=1)
 async def control_voice_channel():
