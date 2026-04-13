@@ -17,7 +17,8 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID_1 = 1228372760212930652  # 스터디 기능 서버
 GUILD_ID_2 = 1170313139225640972  # 공지 기능 서버
-VOICE_CHANNEL_ID = 1358176930725236968  # 음성 채널 ID
+STUDY_CHANNEL_ID = 1358176930725236968  # 스터디 채널 ID (권한 관리용)
+WORK_CHANNEL_ID = 1296431232045027369   # 작업방 채널 ID (자동 입장용)
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -25,9 +26,10 @@ class MyBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix='!', intents=intents)
+        # 자동 입장 상태 저장 변수 (기본값: On)
+        self.auto_join_enabled = True
 
     async def setup_hook(self):
-        # 슬래시 명령어를 디스코드 서버에 등록(동기화)하는 중요한 단계입니다.
         await self.tree.sync()
         print("✅ 슬래시 명령어 동기화 완료!")
 
@@ -48,24 +50,38 @@ async def on_ready():
 
 # --- 슬래시 명령어 정의 ---
 
-@bot.tree.command(name="입장", description="봇을 음성 채널로 부릅니다.")
+@bot.tree.command(name="자동입장", description="봇의 음성 채널 자동 재접속 기능을 켜거나 끕니다.")
+@app_commands.describe(상태="자동 입장을 켤지(on) 끌지(off) 선택하세요.")
+@app_commands.choices(상태=[
+    app_commands.Choice(name="켜기 (On)", value="on"),
+    app_commands.Choice(name="끄기 (Off)", value="off")
+])
+async def 자동입장(interaction: discord.Interaction, 상태: str):
+    if 상태 == "on":
+        bot.auto_join_enabled = True
+        await interaction.response.send_message("✅ 이제부터 봇이 작업방에 자동으로 입장합니다.")
+    else:
+        bot.auto_join_enabled = False
+        if interaction.guild.voice_client:
+            await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("❌ 자동 입장 기능을 껐습니다. 봇이 채널에서 퇴장합니다.")
+
+@bot.tree.command(name="입장", description="봇을 현재 채널이나 작업방으로 부릅니다.")
 async def 입장(interaction: discord.Interaction):
-    # 슬래시 명령어에서는 ctx 대신 interaction을 사용합니다.
     if interaction.user.voice:
         channel = interaction.user.voice.channel
+    else:
+        guild = bot.get_guild(GUILD_ID_1)
+        channel = guild.get_channel(WORK_CHANNEL_ID)
+    
+    if channel:
         if interaction.guild.voice_client:
             await interaction.guild.voice_client.move_to(channel)
         else:
             await channel.connect()
         await interaction.response.send_message(f"✅ {channel.name} 채널에 입장했습니다!")
     else:
-        guild = bot.get_guild(GUILD_ID_1)
-        channel = guild.get_channel(VOICE_CHANNEL_ID)
-        if channel:
-            await channel.connect()
-            await interaction.response.send_message(f"✅ 설정된 스터디 채널({channel.name})에 입장했습니다!")
-        else:
-            await interaction.response.send_message("⚠️ 입장할 음성 채널을 찾을 수 없습니다.")
+        await interaction.response.send_message("⚠️ 채널을 찾을 수 없습니다.")
 
 @bot.tree.command(name="퇴장", description="봇을 음성 채널에서 내보냅니다.")
 async def 퇴장(interaction: discord.Interaction):
@@ -75,30 +91,39 @@ async def 퇴장(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ 봇이 음성 채널에 있지 않습니다.")
 
-# --- 기존 루프 기능 (그대로 유지) ---
+# --- 매 분마다 실행되는 루프 기능 ---
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
     guild = bot.get_guild(GUILD_ID_1)
-    channel = guild.get_channel(VOICE_CHANNEL_ID)
+    
+    # 1. 자동 입장 로직 (작업방 대상)
+    if bot.auto_join_enabled:
+        work_channel = guild.get_channel(WORK_CHANNEL_ID)
+        if work_channel and guild.voice_client is None:
+            try:
+                await work_channel.connect()
+                print(f"🔄 [{now_korea}] 자동 재접속: 작업방 입장 완료.")
+            except Exception as e:
+                print(f"⚠️ 재접속 실패: {e}")
 
-    if guild is None or channel is None: return
-
-    everyone = guild.default_role
-    study_role = discord.utils.get(guild.roles, name="스터디")
-    if study_role is None: return
-
-    await channel.set_permissions(everyone, connect=False)
-
-    if time(18, 0) <= now_korea.time() <= time(23, 0):
-        await channel.set_permissions(study_role, connect=True)
-        if channel.name != "🟢 스터디":
-            await channel.edit(name="🟢 스터디")
-    else:
-        await channel.set_permissions(study_role, connect=False)
-        if channel.name != "🔴 스터디":
-            await channel.edit(name="🔴 스터디")
+    # 2. 스터디 채널 권한 및 이름 관리
+    study_channel = guild.get_channel(STUDY_CHANNEL_ID)
+    if guild and study_channel:
+        everyone = guild.default_role
+        study_role = discord.utils.get(guild.roles, name="스터디")
+        
+        if study_role:
+            await study_channel.set_permissions(everyone, connect=False)
+            if time(18, 0) <= now_korea.time() <= time(23, 0):
+                await study_channel.set_permissions(study_role, connect=True)
+                if study_channel.name != "🟢 스터디":
+                    await study_channel.edit(name="🟢 스터디")
+            else:
+                await study_channel.set_permissions(study_role, connect=False)
+                if study_channel.name != "🔴 스터디":
+                    await study_channel.edit(name="🔴 스터디")
 
 @tasks.loop(minutes=1)
 async def send_notifications():
