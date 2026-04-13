@@ -139,22 +139,23 @@ async def control_voice_channel():
     guild = bot.get_guild(GUILD_ID_1)
     if not guild: return
     
-    # 자동 입장 로직 수정 (4006 에러 방지 강화)
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
-        
-        # 음성 연결 상태를 아주 꼼꼼하게 확인합니다.
-        # voice_client가 아예 없거나, 있어도 연결이 안 된 상태일 때만 접속 시도!
         if work_channel:
-            if guild.voice_client is None or not guild.voice_client.is_connected():
+            # 1. 봇의 현재 음성 상태(voice_client)를 가져옵니다.
+            voice = guild.voice_client
+            
+            # 2. 연결이 '아예 없거나' 혹은 '연결이 끊어진 상태'일 때만 접속 시도
+            if voice is None or not voice.is_connected():
                 try:
-                    # 기존에 찌꺼기가 남아있을 수 있으니 안전하게 새로 연결
                     await work_channel.connect(reconnect=True, timeout=10)
-                    print(f"🔄 [{now_korea}] 음성 채널 자동 연결 성공.")
+                    print(f"🔄 [{now_korea}] 음성 채널 연결 성공!")
                 except Exception as e:
-                    print(f"⚠️ 음성 연결 실패: {e}")
+                    # 이미 연결되었다는 에러(Already connected)는 무시하도록 예외 처리
+                    if "Already connected" not in str(e):
+                        print(f"⚠️ 음성 연결 실패: {e}")
             else:
-                # 이미 잘 연결되어 있다면 아무것도 하지 않고 조용히 넘어갑니다.
+                # 이미 잘 연결되어 있다면 로그를 남기지 않고 그냥 넘어갑니다.
                 pass
 
     # 2. 스터디 채널 관리
