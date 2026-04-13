@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, time
-import os
 import pytz
 import asyncio
 import json
@@ -11,6 +10,7 @@ from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
 from google import genai
+from supabase import create_client, Client
 
 # 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
@@ -28,6 +28,10 @@ client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options={'api_version': 'v1beta'}
 )
+
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 2. 모델 리스트 최적화
 MODEL_LIST = [
@@ -50,8 +54,8 @@ PERSONALITY_PROMPTS = {
         "상대를 '허접'취급하며 킹받게 하는 도발적인 모드야. "
         "하지만 속으로는 실력을 인정하고 있어서, 칭찬할 때도 비꼬면서 해. "
         "특징: 반말 사용, '~잖아', '~네?' 같은 종결어미, '♡' 기호를 섞어 쓰며 약 올리기. "
-        "예시 말투: '뭐야~ 아직도 이거 붙잡고 있는 거야? 진짜 허접~♡', '오~ 제법인데? 그래도 뜌비 눈에는 아직 멀었지만 말이야! 풉-'"
-	"허접~♡ 같은 말투를 써"
+        "예시 말투: '뭐야~ 아직도 이거 붙잡고 있는 거야? 진짜 허접~♡','오~ 제법인데? 그래도 뜌비 눈에는 아직 멀었지만 말이야! 풉-'"
+		"'허접~♡' 같은 말투를 써."
     ),
     "츤데레": (
         "부끄러움을 독설로 감추는 전형적인 츤데레 딸이야. "
@@ -101,33 +105,31 @@ async def on_ready():
 
 # --- Gemini 대화 로직 ---
 SHUVI_USER_ID = 440517859140173835
-MEMORY_FILE = "memory.json"
-
-def load_full_memory():
+def get_memory_from_db():
     try:
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if not content: return []
-                return json.loads(content)
+        # DB에서 최신 대화 15개를 가져옵니다.
+        res = supabase.table("memory").select("*").order("created_at", desc=True).limit(15).execute()
+        memory_list = res.data
+        
+        formatted_memory = ""
+        # 최신순으로 가져왔으므로 다시 시간순(reversed)으로 정렬해서 텍스트화
+        for m in reversed(memory_list):
+            formatted_memory += f"{m['user_name']}: {m['user_msg']} -> 뜌비: {m['bot_res']}\n"
+        return formatted_memory
     except Exception as e:
-        print(f"기억 읽기 에러: {e}")
-    return []
+        print(f"❌ 기억 불러오기 에러: {e}")
+        return ""
 
 def save_to_memory(user_name, user_msg, bot_res):
     try:
-        memory = load_full_memory()
-        memory.append({
-            "user": user_name,
-            "message": user_msg,
-            "reply": bot_res,
-            "time": datetime.now(korea).strftime("%m-%d %H:%M")
-        })
-        if len(memory) > 30: memory = memory[-30:] # 최근 30개만 저장
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(memory, f, ensure_ascii=False, indent=4)
+        # DB의 memory 테이블에 대화 내용 저장
+        supabase.table("memory").insert({
+            "user_name": user_name,
+            "user_msg": user_msg,
+            "bot_res": bot_res
+        }).execute()
     except Exception as e:
-        print(f"기억 저장 에러: {e}")
+        print(f"❌ 기억 저장 에러: {e}")
 
 
 @bot.event
@@ -135,12 +137,11 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # 뜌비를 부르거나 멘션했을 때 실행
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
-            past_conversations = load_full_memory()
-            history_context = ""
-            for chat in past_conversations:
-                history_context += f"{chat['user']}: {chat['message']} -> 뜌비: {chat['reply']}\n"
+            # 1. DB에서 최근 대화 내용(기억) 가져오기
+            history_context = get_memory_from_db()
             
             is_shuvi = (message.author.id == SHUVI_USER_ID)
             user_display_name = message.author.display_name
@@ -148,25 +149,26 @@ async def on_message(message):
             # 현재 설정된 성격 지침 가져오기
             personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
+            # 2. 시스템 지침 설정
             if is_shuvi:
                 system_instruction = (
-                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 지금 상대는 너의 창조주 슈비님이야. "
-                    f"아래는 최근 사람들과 나눈 대화 기록이야:\n{history_context}\n"
-                    f"너의 성격 컨셉: {personality_guide} "
+                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 지금 상대는 너의 창조주 슈비님이야.\n"
+                    f"아래는 최근 우리들이 나눈 대화 기록이야:\n{history_context}\n"
+                    f"너의 성격 컨셉: {personality_guide}\n"
                     "창조주인 슈비님을 대할 때 이 컨셉을 충실히 지켜서 대답해줘."
                 )
             else:
                 system_instruction = (
-                    f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_display_name}'이야. "
+                    f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_display_name}'이야.\n"
                     f"최근 대화 기록:\n{history_context}\n"
-                    f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야. "
-                    "만약 슈비님이 아닌 사람이 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!' 같은 식으로 말해줘. 같은말을 반복하는것도 별로 좋진 않아."
-                    "딱히 사칭을 하지 않았다면 경계하지 않아도 괜찮아. 의심하지도 말고."
+                    f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야.\n"
+                    "만약 슈비님이 아닌 사람이 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!'라고 단호하게 말해줘."
                 )
 
             success = False
             last_error = ""
 
+            # 3. 모델 리스트를 순회하며 답변 생성 시도
             for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
@@ -174,21 +176,29 @@ async def on_message(message):
                         contents=message.content,
                         config={'system_instruction': system_instruction}
                     )
+                    
                     if response and response.text:
+                        # 답변 전송
                         await message.reply(response.text)
+                        
+                        # 4. [중요] 대화 내용을 DB에 저장해서 기억하게 함
                         save_to_memory(user_display_name, message.content, response.text)
+                        
                         bot.active_model = model_name
                         success = True
                         break
+                        
                 except Exception as e:
                     last_error = str(e).upper()
                     print(f"⚠️ {model_name} 실패: {e}")
                     continue
 
+            # 모든 모델이 실패했을 경우
             if not success:
                 bot.active_model = "전체 한도 초과"
                 await message.reply("미안! 지금은 기운이 없어... 내일 오후 4시에 다시 올게! 😭")
     
+    # 다른 명령어들도 정상 작동하게 함
     await bot.process_commands(message)
 
 # --- 슬래시 명령어 ---
