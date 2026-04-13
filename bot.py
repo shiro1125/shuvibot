@@ -190,21 +190,28 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
 
 @bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
-    # 관리자 체크
+    # 관리자(슈비님) 체크
     if interaction.user.id != SHUVI_USER_ID:
         await interaction.response.send_message("뜌비의 내부 상태는 슈비 엄마만 볼 수 있어! 🤫", ephemeral=True)
         return
 
-    # 가독성을 위해 모델 리스트와 현재 상태 출력
-    model_status = "🤖 **뜌비봇 시스템 현황**\n"
-    model_status += "---"
-    model_status += f"\n🔥 현재 작동 모델: `{bot.active_model}`"
-    model_status += f"\n🎭 현재 성격 설정: **{bot.current_personality}**"
-    model_status += f"\n🎙️ 자동 입장 기능: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
-    model_status += "\n---"
+    # 가독성을 위한 현황판 작성
+    status_msg = "🤖 **뜌비봇 모델 가동 현황**\n"
+    status_msg += "---\n"
     
-    await interaction.response.send_message(model_status)
-
+    for i, model in enumerate(MODEL_LIST, 1):
+        # 현재 답변에 성공해서 활성화된 모델은 불꽃 아이콘과 함께 표시
+        if model == bot.active_model:
+            status_msg += f"🔥 **작동 중: {model}**\n"
+        else:
+            status_msg += f"{i}순위: {model}\n"
+            
+    status_msg += "\n"
+    status_msg += f"🎭 현재 성격 설정: **{bot.current_personality}**\n"
+    status_msg += f"🎙️ 자동 입장 기능: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**\n"
+    status_msg += "---"
+    
+    await interaction.response.send_message(status_msg)
 # --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
 
 @tasks.loop(minutes=1)
