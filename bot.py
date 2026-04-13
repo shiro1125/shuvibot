@@ -91,8 +91,6 @@ class MyBot(commands.Bot):
 bot = MyBot()
 app = Flask(__name__)
 
-affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
-bot.tree.add_command(affinity_group)
 
 def get_user_affinity(user_id, user_name):
     try:
@@ -117,7 +115,15 @@ def health_check():
 
 @bot.event
 async def on_ready():
+    # 봇이 켜지자마자 서버에 슬래시 명령어를 최신화합니다.
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ {len(synced)}개의 슬래시 명령어 동기화 완료!")
+    except Exception as e:
+        print(f"❌ 명령어 동기화 실패: {e}")
+
     print(f'✅ 봇 로그인됨: {bot.user}')
+    
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
