@@ -52,6 +52,15 @@ def health_check():
 @bot.event
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
+print("🔍 현재 사용 가능한 모델 목록 확인 중...")
+    try:
+        # v1beta 통로를 통해 접근 가능한 모든 모델 리스트를 가져옵니다.
+        for model in client.models.list():
+            print(f"📌 발견된 모델: {model.name}")
+    except Exception as e:
+        print(f"❌ 모델 목록 확인 실패: {e}")
+    # --- 여기까지 추가 ---
+
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
