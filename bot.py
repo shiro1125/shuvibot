@@ -7,20 +7,18 @@ import pytz
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
-from google import genai  # 최신 Gemini 라이브러리
+from google import genai
 
 # 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
-
-# .env 파일에서 환경변수 불러오기
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GUILD_ID_1 = 1228372760212930652  # 스터디 기능 서버
-GUILD_ID_2 = 1170313139225640972  # 공지 기능 서버
-STUDY_CHANNEL_ID = 1358176930725236968  # 스터디 채널 ID
-WORK_CHANNEL_ID = 1296431232045027369   # 작업방 채널 ID
+GUILD_ID_1 = 1228372760212930652
+GUILD_ID_2 = 1170313139225640972
+STUDY_CHANNEL_ID = 1358176930725236968
+WORK_CHANNEL_ID = 1296431232045027369
 
 # Gemini 설정
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -31,7 +29,7 @@ class MyBot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = True
         intents.message_content = True
-        intents.voice_states = True # 음성 상태 감지 필수
+        intents.voice_states = True
         super().__init__(command_prefix='!', intents=intents)
         self.auto_join_enabled = True
 
@@ -44,43 +42,43 @@ app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return '뜌비봇 시스템 정상 가동 중!', 200
+    return 'OK', 200
 
 @bot.event
 async def on_ready():
     print(f'✅ 봇 로그인됨: {bot.user}')
+    # 루프 시작 전 중복 체크
     if not control_voice_channel.is_running():
         control_voice_channel.start()
     if not send_notifications.is_running():
         send_notifications.start()
 
-# --- Gemini 대화 이벤트 추가 ---
+# --- Gemini 대화 (on_message) ---
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 멘션되거나 '뜌비' 단어가 포함된 경우 대답
+    # 멘션이나 '뜌비' 단어 포함 시
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         try:
             async with message.channel.typing():
+                # 최신 SDK 호출 방식
                 response = client.models.generate_content(
                     model=MODEL_ID,
                     contents=message.content
                 )
-                if response.text:
+                if response and response.text:
                     await message.reply(response.text)
         except Exception as e:
             print(f"❌ Gemini 에러: {e}")
+            # 에러 발생 시 사용자에게 알림
             await message.reply(f"미안뜌비! 에러가 났어: {e}")
     
-    # 기존 명령어(가령 !로 시작하는 것)도 처리할 수 있게 유지
     await bot.process_commands(message)
 
-# --- 기존 슬래시 명령어 정의 ---
-
+# --- 슬래시 명령어 ---
 @bot.tree.command(name="자동입장", description="봇의 음성 채널 자동 재접속 기능을 켜거나 끕니다.")
-@app_commands.describe(상태="자동 입장을 켤지(on) 끌지(off) 선택하세요.")
 @app_commands.choices(상태=[
     app_commands.Choice(name="켜기 (On)", value="on"),
     app_commands.Choice(name="끄기 (Off)", value="off")
@@ -93,7 +91,7 @@ async def 자동입장(interaction: discord.Interaction, 상태: str):
         bot.auto_join_enabled = False
         if interaction.guild.voice_client:
             await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("❌ 자동 입장 기능을 껐습니다. 봇이 채널에서 퇴장합니다.")
+        await interaction.response.send_message("❌ 자동 입장 기능을 껐습니다.")
 
 @bot.tree.command(name="입장", description="봇을 현재 채널이나 작업방으로 부릅니다.")
 async def 입장(interaction: discord.Interaction):
@@ -116,22 +114,22 @@ async def 입장(interaction: discord.Interaction):
 async def 퇴장(interaction: discord.Interaction):
     if interaction.guild.voice_client:
         await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("👋 음성 채널에서 퇴장했습니다.")
+        await interaction.response.send_message("👋 퇴장했습니다.")
     else:
-        await interaction.response.send_message("❌ 봇이 음성 채널에 있지 않습니다.")
+        await interaction.response.send_message("❌ 음성 채널에 있지 않습니다.")
 
-# --- 매 분마다 실행되는 루프 기능 (기존 로직 유지) ---
-
+# --- 매 분마다 실행되는 루프 ---
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
     guild = bot.get_guild(GUILD_ID_1)
     if not guild: return
     
-    # 1. 자동 입장 로직
+    # 1. 자동 입장 (이미 연결되어 있다면 패스하도록 수정)
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
-        if work_channel and guild.voice_client is None:
+        # 중요: voice_client가 없을 때만 접속 시도 (무한 루프 방지)
+        if work_channel and not guild.voice_client:
             try:
                 await work_channel.connect()
                 print(f"🔄 [{now_korea}] 자동 재접속 완료.")
@@ -144,11 +142,12 @@ async def control_voice_channel():
         everyone = guild.default_role
         study_role = discord.utils.get(guild.roles, name="스터디")
         if study_role:
-            await study_channel.set_permissions(everyone, connect=False)
             if time(18, 0) <= now_korea.time() <= time(23, 0):
+                await study_channel.set_permissions(everyone, connect=False)
                 await study_channel.set_permissions(study_role, connect=True)
                 if study_channel.name != "🟢 스터디": await study_channel.edit(name="🟢 스터디")
             else:
+                await study_channel.set_permissions(everyone, connect=False)
                 await study_channel.set_permissions(study_role, connect=False)
                 if study_channel.name != "🔴 스터디": await study_channel.edit(name="🔴 스터디")
 
