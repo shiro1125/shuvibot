@@ -26,7 +26,7 @@ CHAT_CHANNEL_ID = 1228378104662196254
 
 # Gemini 설정
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3-flash')
 
 class MyBot(commands.Bot):
     def __init__(self):
