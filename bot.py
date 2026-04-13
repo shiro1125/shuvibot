@@ -20,10 +20,10 @@ GUILD_ID_2 = 1170313139225640972
 STUDY_CHANNEL_ID = 1358176930725236968
 WORK_CHANNEL_ID = 1296431232045027369
 
-# 통로 설정은 정석인 v1으로 둡니다.
+# 1. 다시 v1beta 통로로 돌아갑니다 (슈비님 계정 맞춤형)
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options={'api_version': 'v1'}
+    http_options={'api_version': 'v1beta'} # 다시 beta로 변경
 )
 
 # 이름을 리스트에 있던 가장 안정적인 'gemini-2-flash'로 변경합니다.
