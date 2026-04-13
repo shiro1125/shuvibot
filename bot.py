@@ -91,6 +91,8 @@ class MyBot(commands.Bot):
 bot = MyBot()
 app = Flask(__name__)
 
+affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
+bot.tree.add_command(affinity_group)
 
 def get_user_affinity(user_id, user_name):
     try:
@@ -261,32 +263,65 @@ async def on_message(message):
 # --- 슬래시 명령어 ---
 
 affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
+bot.tree.add_command(affinity_group)
 
+# --- [친밀도 확인] ---
 @affinity_group.command(name="확인", description="유저의 친밀도를 확인합니다.")
+@app_commands.describe(유저="친밀도를 확인할 유저를 선택하세요 (비우면 본인 확인)")
 async def 확인(interaction: discord.Interaction, 유저: discord.Member = None):
     target = 유저 or interaction.user
     affinity = get_user_affinity(target.id, target.display_name)
-    await interaction.response.send_message(f"📊 {target.display_name}님과 뜌비의 친밀도는 **{affinity}**점이야!")
+    
+    # 점수대별 간단한 상태 메시지 추가
+    if affinity > 70: status = "영원한 단짝 💖"
+    elif affinity > 30: status = "친한 친구 😊"
+    elif affinity >= 0: status = "안면 있는 사이 😐"
+    else: status = "조심해야 할 사람 💀"
 
-@affinity_group.command(name="설정", description="친밀도를 강제 설정합니다 (슈비 전용)")
+    await interaction.response.send_message(
+        f"📊 **{target.display_name}**님과 뜌비의 친밀도는 **{affinity}점**이야! (현재 상태: {status})"
+    )
+
+# --- [친밀도 설정] (엄마 전용) ---
+@affinity_group.command(name="설정", description="친밀도를 강제로 설정합니다 (슈비 엄마 전용)")
+@app_commands.describe(유저="점수를 바꿀 유저", 수치="설정할 점수")
 async def 설정(interaction: discord.Interaction, 유저: discord.Member, 수치: int):
     if interaction.user.id != SHUVI_USER_ID:
         await interaction.response.send_message("슈비 엄마만 할 수 있어! 🤫", ephemeral=True)
         return
-    supabase.table("user_stats").upsert({"user_id": 유저.id, "user_name": 유저.display_name, "affinity": 수치}).execute()
-    await interaction.response.send_message(f"✅ {유저.display_name}님의 점수를 {수치}로 바꿨어!")
+    
+    supabase.table("user_stats").upsert({
+        "user_id": 유저.id, 
+        "user_name": 유저.display_name, 
+        "affinity": 수치
+    }).execute()
+    await interaction.response.send_message(f"✅ **{유저.display_name}**님의 점수를 **{수치}점**으로 바꿨어, 엄마!")
 
-@affinity_group.command(name="랭킹", description="친밀도 TOP 5를 보여줍니다.")
+# --- [친밀도 랭킹] (TOP 30) ---
+@affinity_group.command(name="랭킹", description="뜌비의 절친 TOP 30 랭킹을 보여줍니다.")
 async def 랭킹(interaction: discord.Interaction):
-    res = supabase.table("user_stats").select("user_name, affinity").order("affinity", desc=True).limit(5).execute()
+    # 상위 30명 데이터 조회 (limit을 30으로 수정)
+    res = supabase.table("user_stats").select("user_name, affinity").order("affinity", desc=True).limit(30).execute()
+    
     if not res.data:
-        await interaction.response.send_message("아직 친한 사람이 없네...")
+        await interaction.response.send_message("아직 친한 사람이 없네... 😭")
         return
-    msg = "🏆 **뜌비의 절친 랭킹**\n"
+        
+    msg = "🏆 **뜌비의 절친 랭킹 (TOP 30)**\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+    
     for i, r in enumerate(res.data, 1):
-        msg += f"{i}위: {r['user_name']} ({r['affinity']}점)\n"
+        # 1, 2, 3위는 특별 아이콘
+        if i == 1: medal = "🥇"
+        elif i == 2: medal = "🥈"
+        elif i == 3: medal = "🥉"
+        else: medal = f"**{i}위**"
+        
+        msg += f"{medal} {r['user_name']} ― `{r['affinity']}점` \n"
+        
     await interaction.response.send_message(msg)
 
+# --- [성격 변경] ---
 @bot.tree.command(name="성격", description="뜌비의 성격을 변경합니다.")
 @app_commands.choices(설정=[
     app_commands.Choice(name="기본", value="기본"),
@@ -302,48 +337,38 @@ async def 성격변경(interaction: discord.Interaction, 설정: app_commands.Ch
     bot.current_personality = 설정.value
     await interaction.response.send_message(f"✅ 뜌비의 성격이 **{설정.value}** 상태로 바뀌었어!")
 
+# --- [자동 입장 설정] ---
 @bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
 @app_commands.choices(상태=[
     app_commands.Choice(name="켜기 (On)", value="on"),
     app_commands.Choice(name="끄기 (Off)", value="off")
 ])
 async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Choice[str]):
-    # 관리자 체크
     if interaction.user.id != SHUVI_USER_ID:
         await interaction.response.send_message("자동 입장 설정은 슈비 엄마만 건드릴 수 있어!", ephemeral=True)
         return
 
     bot.auto_join_enabled = (상태.value == "on")
-    
-    # 끄기 옵션을 선택했을 때 봇이 현재 통화방에 있다면 나가게 함
     if 상태.value == "off" and interaction.guild.voice_client:
         await interaction.guild.voice_client.disconnect()
         
     await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
 
+# --- [모델 상태 확인] ---
 @bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
-    # 관리자(슈비님) 체크
     if interaction.user.id != SHUVI_USER_ID:
         await interaction.response.send_message("뜌비의 내부 상태는 슈비 엄마만 볼 수 있어! 🤫", ephemeral=True)
         return
 
-    # 가독성을 위한 현황판 작성
     status_msg = "🤖 **뜌비봇 모델 가동 현황**\n"
     status_msg += "---\n"
-    
     for i, model in enumerate(MODEL_LIST, 1):
-        # 현재 답변에 성공해서 활성화된 모델은 불꽃 아이콘과 함께 표시
-        if model == bot.active_model:
-            status_msg += f"🔥 **작동 중: {model}**\n"
-        else:
-            status_msg += f"{i}순위: {model}\n"
+        prefix = "🔥 **작동 중**" if model == bot.active_model else f"{i}순위"
+        status_msg += f"{prefix}: `{model}`\n"
             
-    status_msg += "\n"
-    status_msg += f"🎭 현재 성격 설정: **{bot.current_personality}**\n"
-    status_msg += f"🎙️ 자동 입장 기능: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**\n"
-    status_msg += "---"
-    
+    status_msg += f"\n🎭 현재 성격: **{bot.current_personality}**"
+    status_msg += f"\n🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**\n---"
     await interaction.response.send_message(status_msg)
 # --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
 
