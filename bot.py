@@ -27,7 +27,7 @@ client = genai.Client(
 )
 
 # 이름을 리스트에 있던 가장 안정적인 'gemini-2-flash'로 변경합니다.
-MODEL_ID = "gemini-2-flash"
+MODEL_ID = "models/gemini-3-flash-preview"
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -140,10 +140,10 @@ async def control_voice_channel():
     guild = bot.get_guild(GUILD_ID_1)
     if not guild: return
     
-    # 1. 자동 입장 (중복 접속 방지 로직 유지)
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
-        if work_channel and not guild.voice_client:
+        # 이미 연결된 상태(voice_client 존재)라면 다시 connect() 하지 않도록 체크
+        if work_channel and (not guild.voice_client or not guild.voice_client.is_connected()):
             try:
                 await work_channel.connect()
                 print(f"🔄 [{now_korea}] 자동 재접속 완료.")
