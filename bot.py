@@ -307,8 +307,9 @@ async def on_message(message):
                                 config={'system_instruction': system_instruction}
                             )
                         
-                        if response and response.text:
-                full_text = response.text
+# --- Gemini 답변 생성 및 처리 로직 ---
+            if response and response.text:
+                full_text = response.text  # <- 여기서부터 한 칸(스페이스 4칸) 더 들어가야 해요!
                 score_change = 0
                 
                 # 1. 점수 파싱 로직
@@ -323,13 +324,10 @@ async def on_message(message):
                 else:
                     clean_res = full_text
 
-                # 2. 메시지 전송 및 데이터 업데이트
-                # ✅ [중요] 메시지 작성자가 봇이 아닐 때만 점수를 업데이트함
+                # 2. 메시지 전송 및 데이터 업데이트 (진짜 사람일 때만)
                 if not message.author.bot:
                     await message.reply(clean_res)
                     save_to_memory(user_name, message.content, clean_res)
-                    
-                    # 진짜 유저일 때만 친밀도 함수 호출!
                     update_user_affinity(user_id, user_name, score_change)
                 
                 success = True
