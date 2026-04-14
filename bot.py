@@ -383,18 +383,15 @@ async def on_message(message):
                             # 정해진 score_change(최대 20)로 업데이트 진행
                             if 'update_user_affinity' in globals():
                                 update_user_affinity(user_id, user_name, score_change)
-                            
-                            # --- 수정된 부분: 기본 성격일 때만 메모리에 저장 ---
-                            if bot.current_personality == "기본" and 'save_to_memory' in globals():
-                                save_to_memory(user_name, message.content, clean_res)
-                            
-                            # 친밀도 업데이트는 성격에 관계없이 수행 (원치 않으시면 위 if문 안으로 옮기시면 됩니다)
-                            if 'update_user_affinity' in globals():
-                                update_user_affinity(user_id, user_name, score_change)
-                            
-                            success = True
-                            break # 답변 성공 시 루프 종료
 
+                                # [수정] 메모리 저장은 기본 성격일 때만
+                            if bot.current_personality == "기본" and 'save_to_memory' in globals():
+                                    save_to_memory(user_name, message.content, clean_res)
+
+                    # 아래에 있던 중복된 update_user_affinity 구문은 삭제했습니다.
+    
+                            success = True
+                            break
                     except Exception as e:
                         err_str = str(e).upper()
                         print(f"‼️ {model_name} 실패 원인: {err_str}")
