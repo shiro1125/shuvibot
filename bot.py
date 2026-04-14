@@ -567,14 +567,14 @@ async def your_gemini_function(user, text):
 
         # 2. 텍스트 채널에 기록 남기 (작업방 ID 사용)
         channel = bot.get_channel(WORK_CHANNEL_ID)
-        if channel:
-            await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
+    if channel:
+        await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
 
         # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
         # 예: await play_tts_voice(reply_text)
 
-        except Exception as e:
-            print(f"❌ 제미니 응답 실패: {e}")
+    except Exception as e:
+        print(f"❌ 제미니 응답 실패: {e}")
 
 
 # -----------------------------
