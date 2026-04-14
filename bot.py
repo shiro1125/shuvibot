@@ -236,9 +236,8 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 뜌비가 언급되었거나 이름이 포함된 경우
+    # 1. 뜌비가 언급되었거나 이름이 포함된 경우에만 실행
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
-        # 중복 응답 방지
         if hasattr(bot, 'is_processing') and bot.is_processing:
             return
 
@@ -385,12 +384,16 @@ async def on_message(message):
                 if not success:
                     await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 😭 내일 오후 4시에 다시 불러줘!")
 
-        except Exception as top_e:
+    except Exception as top_e:
             print(f"❌ [심각] 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
-
-    # 일반 명령어 처리
+            
+        # --- 여기가 핵심 수정 포인트! ---
+        if success: 
+            return # 뜌비가 이미 답변(성공)했다면 여기서 함수를 완전히 끝냅니다.
+            
+    # 뜌비 대화가 아닐 때만(예: !입장, /모델 등) 아래 명령어를 실행함
     await bot.process_commands(message)
 
 # --- 슬래시 명령어 ---
