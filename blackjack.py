@@ -6,7 +6,7 @@ import os
 from typing import Optional
 from supabase import create_client, Client
 
-# Supabase 설정 (환경 변수 권장)
+# Supabase 설정 (환경 변수에서 가져오기)
 URL: str = os.getenv("SUPABASE_URL")
 KEY: str = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(URL, KEY)
@@ -16,37 +16,60 @@ class Blackjack(commands.Cog):
         self.bot = bot
         self.decks = {}
 
-    def get_user_stats(self, user_id):
-        # DB에서 유저 데이터 가져오기 (없으면 생성)
+    def get_actual_affinity(self, user_id):
+        """user_stats 테이블에서 실제 유저의 친밀도를 가져옵니다."""
         uid = str(user_id)
-        res = supabase.table("blackjack_stats").select("*").eq("user_id", uid).execute()
-        
-        if not res.data:
-            new_data = {"user_id": uid, "win": 0, "lose": 0, "draw": 0, "total": 0, "affinity": 100}
-            supabase.table("blackjack_stats").insert(new_data).execute()
-            return new_data
-        return res.data[0]
+        try:
+            res = supabase.table("user_stats").select("affinity").eq("user_id", uid).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]["affinity"]
+            return 0
+        except Exception as e:
+            print(f"친밀도 가져오기 에러: {e}")
+            return 0
 
-    def update_db(self, user_id, result, bet_amount=0):
+    def get_blackjack_data(self, user_id, user_name):
+        """blackjack_stats 테이블에서 전적 데이터를 가져오거나 생성합니다."""
         uid = str(user_id)
-        current = self.get_user_stats(user_id)
-        
-        updates = {
-            "total": current["total"] + 1,
-            "affinity": current["affinity"]
-        }
-        
-        if result == "win":
-            updates["win"] = current["win"] + 1
-            updates["affinity"] += bet_amount
-        elif result == "lose":
-            updates["lose"] = current["lose"] + 1
-            updates["affinity"] -= bet_amount
-        else:
-            updates["draw"] = current["draw"] + 1
-            # 무승부는 친밀도 변동 없음 (1배)
+        try:
+            res = supabase.table("blackjack_stats").select("*").eq("user_id", uid).execute()
+            if not res.data:
+                new_record = {
+                    "user_id": uid, 
+                    "user_name": user_name,
+                    "win": 0, "lose": 0, "draw": 0, "total": 0
+                }
+                supabase.table("blackjack_stats").insert(new_record).execute()
+                return new_record
+            return res.data[0]
+        except Exception as e:
+            print(f"전적 데이터 조회 에러: {e}")
+            return None
 
-        supabase.table("blackjack_stats").update(updates).eq("user_id", uid).execute()
+    def update_stats(self, user_id, user_name, result, bet_amount):
+        """결과를 blackjack_stats(전적)와 user_stats(친밀도) 양쪽에 업데이트합니다."""
+        uid = str(user_id)
+        
+        # 1. 블랙잭 전적 업데이트
+        current_bj = self.get_blackjack_data(user_id, user_name)
+        if current_bj:
+            bj_updates = {
+                "total": current_bj["total"] + 1,
+                "user_name": user_name
+            }
+            if result == "win": bj_updates["win"] = current_bj["win"] + 1
+            elif result == "lose": bj_updates["lose"] = current_bj["lose"] + 1
+            else: bj_updates["draw"] = current_bj["draw"] + 1
+            
+            supabase.table("blackjack_stats").update(bj_updates).eq("user_id", uid).execute()
+
+        # 2. user_stats 테이블의 친밀도 업데이트
+        current_affinity = self.get_actual_affinity(user_id)
+        new_affinity = current_affinity
+        if result == "win": new_affinity += bet_amount
+        elif result == "lose": new_affinity -= bet_amount
+        
+        supabase.table("user_stats").update({"affinity": new_affinity}).eq("user_id", uid).execute()
 
     def calculate_score(self, hand):
         score = sum((10 if c in ['J', 'Q', 'K'] else (11 if c == 'A' else int(c))) for c in hand)
@@ -56,59 +79,55 @@ class Blackjack(commands.Cog):
             aces -= 1
         return score
 
-    blackjack_group = app_commands.Group(name="블랙잭", description="Supabase 연동 블랙잭 시스템")
+    blackjack_group = app_commands.Group(name="블랙잭", description="실제 친밀도 연동 블랙잭")
 
     @blackjack_group.command(name="베팅", description="친밀도를 걸고 뜌비와 승부합니다!")
+    @app_commands.describe(수치="베팅할 친밀도 양을 입력하세요.")
     async def betting_game(self, interaction: discord.Interaction, 수치: int):
-        user_data = self.get_user_stats(interaction.user.id)
-        
+        actual_affinity = self.get_actual_affinity(interaction.user.id)
+        user_name = interaction.user.display_name
+
         if 수치 <= 0:
-            return await interaction.response.send_message("0보다 큰 값을 베팅해줘!", ephemeral=True)
-        if 수치 > user_data["affinity"]:
-            return await interaction.response.send_message(f"보유 친밀도({user_data['affinity']})가 부족해!", ephemeral=True)
+            return await interaction.response.send_message("0보다 큰 값을 걸어줘 뜌비!", ephemeral=True)
+        if 수치 > actual_affinity:
+            return await interaction.response.send_message(f"보유하신 친밀도({actual_affinity})가 부족합니다!", ephemeral=True)
 
         deck = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'] * 4
         random.shuffle(deck)
         user_hand, bot_hand = [deck.pop(), deck.pop()], [deck.pop(), deck.pop()]
 
         self.decks[interaction.user.id] = {
-            "deck": deck, "user": user_hand, "bot": bot_hand, 
-            "bet": 수치, "name": interaction.user.display_name
+            "deck": deck, "user": user_hand, "bot": bot_hand, "bet": 수치, "name": user_name
         }
 
-        embed = discord.Embed(title="🎲 블랙잭 베팅 모드", description=f"**베팅 💖: {수치}**", color=0xFF69B4)
-        embed.add_field(name=f"👤 {interaction.user.display_name}", value=f"합계: **{self.calculate_score(user_hand)}**")
-        embed.add_field(name="🤖 뜌비", value=f"카드: {bot_hand[0]}, ❓")
+        embed = discord.Embed(title="🎲 블랙잭 베팅 모드", description=f"**베팅 💖: {수치}**\n(현재 보유 친밀도: {actual_affinity})", color=0xFF69B4)
+        embed.add_field(name=f"👤 {user_name}", value=f"합계: **{self.calculate_score(user_hand)}**", inline=True)
+        embed.add_field(name="🤖 뜌비", value=f"카드: {bot_hand[0]}, ❓", inline=True)
         
-        await interaction.response.send_message(embed=embed, view=BlackjackView(self, interaction.user.id))
+        view = BlackjackView(self, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view)
 
-    @blackjack_group.command(name="랭킹", description="승률 TOP 10 (10판 이상 플레이어)")
+    @blackjack_group.command(name="랭킹", description="승률 TOP 10을 확인합니다 (10판 이상 플레이어)")
     async def show_ranking(self, interaction: discord.Interaction):
-        # 10판 이상인 유저들 가져오기
         res = supabase.table("blackjack_stats").select("*").gte("total", 10).execute()
         players = res.data
-
         if not players:
             return await interaction.response.send_message("아직 랭킹에 등록된 유저가 없어!", ephemeral=True)
 
-        # 승률 계산 후 정렬
         for p in players:
             p['rate'] = (p['win'] / p['total']) * 100
         
         players.sort(key=lambda x: x['rate'], reverse=True)
-        top_10 = players[:10]
-
+        
         embed = discord.Embed(title="🏆 블랙잭 승률 랭킹 (TOP 10)", color=0xF1C40F)
         desc = ""
-        for i, p in enumerate(top_10, 1):
-            member = interaction.guild.get_member(int(p['user_id']))
-            name = member.display_name if member else "익명의 유저"
+        for i, p in enumerate(players[:10], 1):
+            name = p.get('user_name') or f"익명({p['user_id'][:5]})"
             desc += f"**{i}위. {name}** | `{p['rate']:.1f}%` ({p['win']}승/{p['total']}전)\n"
         
         embed.description = desc
         await interaction.response.send_message(embed=embed)
 
-# --- View (버튼 로직) ---
 class BlackjackView(discord.ui.View):
     def __init__(self, cog, user_id):
         super().__init__(timeout=60)
@@ -123,31 +142,46 @@ class BlackjackView(discord.ui.View):
         score = self.cog.calculate_score(data['user'])
         
         if score > 21:
-            self.cog.update_db(self.user_id, "lose", data["bet"])
+            self.cog.update_stats(self.user_id, data['name'], "lose", data["bet"])
             await self.end_game(interaction, "💥 버스트! 뜌비가 베팅금을 가져갈게.")
         else:
-            # 중간 진행 임베드 갱신 로직 (생략)
-            await interaction.response.edit_message(content="카드를 더 뽑았어!")
+            embed = discord.Embed(title="🃏 블랙잭 진행 중", description=f"**베팅 💖: {data['bet']}**", color=0x5865F2)
+            embed.add_field(name=f"👤 {data['name']}", value=f"합계: **{score}**", inline=True)
+            embed.add_field(name="🤖 뜌비", value=f"카드: {data['bot'][0]}, ❓", inline=True)
+            await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="스테이", style=discord.ButtonStyle.secondary)
     async def stay(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id: return
         data = self.cog.decks[self.user_id]
-        u_score, b_score = self.cog.calculate_score(data['user']), self.cog.calculate_score(data['bot'])
+        u_score = self.cog.calculate_score(data['user'])
         
-        while b_score < 17:
+        while self.cog.calculate_score(data['bot']) < 17:
             data['bot'].append(data['deck'].pop())
-            b_score = self.cog.calculate_score(data['bot'])
             
-        result = "win" if b_score > 21 or u_score > b_score else ("draw" if u_score == b_score else "lose")
-        self.cog.update_db(self.user_id, result, data["bet"])
+        b_score = self.cog.calculate_score(data['bot'])
+        if b_score > 21 or u_score > b_score: result = "win"
+        elif u_score < b_score: result = "lose"
+        else: result = "draw"
         
-        msg = "🎊 승리! 친밀도 2배!" if result == "win" else ("🤝 무승부!" if result == "draw" else "😭 패배..")
+        self.cog.update_stats(self.user_id, data['name'], result, data["bet"])
+        
+        msg = "🎊 승리! 친밀도 2배!" if result == "win" else ("🤝 무승부! 원금을 돌려줄게." if result == "draw" else "😭 패배.. 친밀도를 잃었어.")
         await self.end_game(interaction, msg)
 
-    async def end_game(self, interaction, text):
-        # 결과 화면 출력 로직 (생략)
-        await interaction.response.edit_message(content=text, view=None)
+    async def end_game(self, interaction, result_text):
+        data = self.cog.decks[self.user_id]
+        u_score = self.cog.calculate_score(data['user'])
+        b_score = self.cog.calculate_score(data['bot'])
+        
+        color = 0x2ecc71 if "승리" in result_text else (0xe74c3c if "패배" in result_text or "버스트" in result_text else 0x95a5a6)
+        
+        embed = discord.Embed(title="🏁 게임 결과", description=f"**{result_text}**", color=color)
+        embed.add_field(name=f"👤 {data['name']} (최종)", value=f"카드: {', '.join(data['user'])}\n합계: **{u_score}**", inline=True)
+        embed.add_field(name="🤖 뜌비 (최종)", value=f"카드: {', '.join(data['bot'])}\n합계: **{b_score}**", inline=True)
+        embed.set_footer(text="결과가 Supabase DB에 실시간 반영되었습니다.")
+        
+        await interaction.response.edit_message(embed=embed, view=None)
 
 async def setup(bot):
     await bot.add_cog(Blackjack(bot))
