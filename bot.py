@@ -337,7 +337,7 @@ async def on_message(message):
                     else:
                         await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
 
-except Exception as top_e:
+		except Exception as top_e:
             print(f"❌ 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
