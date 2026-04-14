@@ -499,19 +499,19 @@ async def your_gemini_function(user, text):
 
     success = False  # 성공 여부 체크용
     reply_text = ""  # 답변 저장용
+    response = None  # 초기화 (에러 방지)
 
     try:
         bot.is_processing = True
         user_name = user.display_name
         is_shuvi = (user.id == SHUVI_USER_ID)
 
-        # 1. 현재 설정된 성격 가이드 가져오기
+        # 1. 성격 가이드 및 지시문 설정
         personality_guide = PERSONALITY_PROMPTS.get(
             bot.current_personality, 
             PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격")
         )
 
-        # 2. 시스템 지시문 구성 (친밀도 제외, 성격 연기 집중)
         identity_prompt = f"너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 '{user_name}'이야." if not is_shuvi else "상대는 너의 창조주 슈비 엄마야."
         
         system_instruction = (
@@ -524,7 +524,7 @@ async def your_gemini_function(user, text):
             "3. 성격 컨셉에 맞춰서 자연스럽게 리액션해줘."
         )
 
-        # 3. 모델 순회하며 답변 생성
+        # 2. 모델 순회
         available_models = [m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)]
         loop = asyncio.get_running_loop()
 
@@ -546,22 +546,22 @@ async def your_gemini_function(user, text):
                 print(f"⚠️ {model_name} 음성 응답 시도 중 실패: {e}")
                 continue
 
-        # 4. 답변이 성공했을 때만 출력 및 로그 남기
+        # 3. 답변 성공 시 처리
         if success:
             print(f"🤖 [뜌비 음성답변]: {reply_text}")
             channel = bot.get_channel(WORK_CHANNEL_ID)
             if channel:
                 await channel.send(f"🎙️ **{user_name}**: {text}\n🤖 **뜌비({bot.current_personality})**: {reply_text}")
             
-            # [여기에 TTS 재생 코드를 넣으시면 목소리가 나옵니다!]
+            # [TTS 재생 코드가 필요하다면 여기에 추가]
             # await play_tts_voice(reply_text)
 
     except Exception as top_e:
-            print(f"❌ 음성 처리 시스템 에러: {top_e}")
+        print(f"❌ 음성 처리 시스템 심각 에러: {top_e}")
         
-        finally:
-            bot.is_processing = False
-            bot.active_model = "대기 중"
+    finally:
+        bot.is_processing = False
+        bot.active_model = "대기중"
             
             # response.text가 존재할 때만 처리하도록 안전장치 추가
             try:
