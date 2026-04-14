@@ -232,7 +232,7 @@ def health_check():
 
 @bot.event
 async def on_ready():
-    # 봇이 켜지자마자 서버에 슬래시 명령어를 최신화합니다.
+    # 명령어 동기화
     try:
         synced = await bot.tree.sync()
         print(f"✅ {len(synced)}개의 슬래시 명령어 동기화 완료!")
@@ -241,10 +241,18 @@ async def on_ready():
 
     print(f'✅ 봇 로그인됨: {bot.user}')
     
+    # 여기서 모든 루프를 가동시켜요!
     if not control_voice_channel.is_running():
         control_voice_channel.start()
+        print("🎙️ [시스템] 자동 입장 루프 시작!")
+
     if not send_notifications.is_running():
         send_notifications.start()
+        print("🔔 [시스템] 알림 루프 시작!")
+
+    if not rank_check_loop.is_running():
+        rank_check_loop.start()
+        print("👑 [시스템] 랭킹 체크 루프 시작!")
 
 # --- Gemini 대화 로직 ---
 
@@ -609,12 +617,6 @@ async def 모델확인(interaction: discord.Interaction):
 async def rank_check_loop():
     await update_rank_1_role()
 
-# on_ready 함수 안에서 루프 시작시키기
-@bot.event
-async def on_ready():
-    # ... 기존 코드 ...
-    if not rank_check_loop.is_running():
-        rank_check_loop.start()
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
