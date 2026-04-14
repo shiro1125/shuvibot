@@ -90,25 +90,40 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 app = Flask(__name__)
-
-
 def get_user_affinity(user_id, user_name):
     try:
+        # DB에서 이 유저의 점수가 있는지 확인해요
         res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
-        if not res.data:
-            supabase.table("user_stats").insert({"user_id": user_id, "user_name": user_name, "affinity": 0}).execute()
+        if res.data:
+            return res.data[0]['affinity']
+        else:
+            # 기록이 없는 유저라면 새로 0점을 만들어줘요
+            supabase.table("user_stats").insert({
+                "user_id": user_id, 
+                "user_name": user_name, 
+                "affinity": 0
+            }).execute()
             return 0
-        return res.data[0]['affinity']
     except Exception as e:
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
+
 def update_user_affinity(user_id, user_name, amount):
     try:
+        # 위에서 만든 get_user_affinity를 여기서 써서 최신 점수를 가져와요!
         current = get_user_affinity(user_id, user_name)
-        supabase.table("user_stats").upsert({"user_id": user_id, "user_name": user_name, "affinity": current + amount}).execute()
-    except Exception: pass
-
+        
+        supabase.table("user_stats").upsert({
+            "user_id": user_id, 
+            "user_name": user_name, 
+            "affinity": current + amount
+        }).execute()
+        print(f"✅ {user_name}님 친밀도 변동: {current} -> {current + amount}")
+    except Exception as e:
+        print(f"❌ 친밀도 업데이트 에러: {e}")
+        return 0
+		
 @app.route('/')
 def health_check():
     return 'OK', 200
@@ -163,15 +178,15 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    if bot.user.mentioned_in(message) or "뜌비" in message.content:
+   	if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
             # 1. 데이터 가져오기
             history_context = get_memory_from_db()
             user_id = message.author.id
             user_name = message.author.display_name
             
-            res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
-            affinity = res.data[0]['affinity'] if res.data else 0
+            # 최신 친밀도 조회
+            affinity = get_user_affinity(user_id, user_name)
             
             is_shuvi = (user_id == SHUVI_USER_ID)
             personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
@@ -215,8 +230,7 @@ async def on_message(message):
 
             success = False
             last_error = ""
-
-            for model_name in MODEL_LIST:
+for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
                         model=model_name,
@@ -228,7 +242,7 @@ async def on_message(message):
                         full_text = response.text
                         score_change = 1
                         
-                        # [SCORE:] 태그 분리 작업
+                        # [SCORE:] 태그 분리 및 점수 추출
                         if "[SCORE:" in full_text:
                             try:
                                 parts = full_text.split("[SCORE:")
@@ -244,12 +258,9 @@ async def on_message(message):
                         await message.reply(clean_res)
                         save_to_memory(user_name, message.content, clean_res)
 
-                        # 친밀도 반영
-                        supabase.table("user_stats").upsert({
-                            "user_id": user_id, 
-                            "user_name": user_name, 
-                            "affinity": affinity + score_change
-                        }).execute()
+                        # --- 핵심 수정 부분: 변수 계산 대신 함수를 호출하여 최신 DB 값에 더함 ---
+                        update_user_affinity(user_id, user_name, score_change)
+                        # --------------------------------------------------------
                         
                         bot.active_model = model_name
                         success = True
