@@ -296,25 +296,26 @@ async def on_message(message):
 
 # 5. 모델 순회하며 답변 생성
                 success = False
+                # 현재 사용 가능한 모델만 필터링
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)]
+                
+                print(f"🔍 [시스템] 현재 가용한 모델 순서: {available_models}")
 
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
                         
                         # 모델별 호출 설정
-                        # http_options는 지원되지 않는 경우가 많으므로 안전하게 제거하거나 config를 활용합니다.
                         if "gemma" in model_name.lower():
+                            # Gemma 모델은 시스템 인스트럭션을 프롬프트에 포함 (라이브러리 호환성)
                             prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
                             response = client.models.generate_content(model=model_name, contents=prompt)
                         else:
+                            # Gemini 모델 호출
                             response = client.models.generate_content(
                                 model=model_name,
                                 contents=full_content,
-                                config={
-                                    'system_instruction': system_instruction,
-                                    # 필요한 경우 모델 설정값 추가 (timeout은 라이브러리 버전에 따라 위치가 다를 수 있음)
-                                }
+                                config={'system_instruction': system_instruction}
                             )
                         
                         if response and response.text:
@@ -327,7 +328,6 @@ async def on_message(message):
                                     parts = full_text.split("[SCORE:")
                                     clean_res = parts[0].strip()
                                     score_val = parts[1].split("]")[0].strip()
-                                    # "+" 기호 제거 후 정수 변환
                                     score_change = int(score_val.replace("+", ""))
                                 except Exception as parse_err:
                                     print(f"⚠️ 점수 파싱 에러: {parse_err}")
@@ -348,26 +348,31 @@ async def on_message(message):
 
                     except Exception as e:
                         err_str = str(e).upper()
-                        print(f"⚠️ {model_name} 실패: {err_str}")
+                        # ⚠️ 로그 출력 (터미널에서 에러 내용을 확인하는 핵심 포인트)
+                        print(f"‼️ {model_name} 실패 원인: {err_str}")
                         
-                        # 🛑 할당량 초과 및 관련 에러 발생 시 모델 잠금(제외)
-                        if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT"]):
-                            print(f"🚫 {model_name} 한도 초과로 인해 리스트에서 제외합니다.")
+                        # 🛑 할당량 초과 및 관련 에러 발생 시 (429, RESOURCE_EXHAUSTED 등)
+                        if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT", "PERMISSION_DENIED"]):
+                            print(f"🚫 {model_name} 한도 초과 감지! ❌ 상태로 변경합니다.")
+                            
+                            # 1. 전역 상태 즉시 변경
+                            if model_name in MODEL_STATUS:
+                                MODEL_STATUS[model_name]["is_available"] = False
+                            
+                            # 2. lock_model 함수가 있다면 호출하여 추가 로직 실행
                             if 'lock_model' in globals():
                                 lock_model(model_name)
-                            else:
-                                # lock_model 함수가 없을 경우 직접 상태 변경
-                                if model_name in MODEL_STATUS:
-                                    MODEL_STATUS[model_name]["is_available"] = False
+                                
+                            bot.active_model = "대기 중"
                         
-                        # 에러가 발생했으므로 다음 모델로 자동 진행 (continue)
+                        # 다음 순위 모델로 자동 진행
                         continue
 
                 if not success:
-                    await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 나중에 다시 불러줘! 😭")
+                    await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 😭 내일 오후 4시에 다시 불러줘!")
 
         except Exception as top_e:
-            print(f"❌ 전체 로직 에러: {top_e}")
+            print(f"❌ [심각] 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
             bot.active_model = "대기 중"
@@ -513,13 +518,11 @@ async def 모델확인(interaction: discord.Interaction):
     for i, model in enumerate(MODEL_LIST, 1):
         info = MODEL_STATUS.get(model, {"is_available": True})
         
-        # 1순위: 사용 가능 여부 체크 (❌ 표시)
+        # 순서 중요: 한도 초과를 가장 먼저 체크합니다.
         if not info["is_available"]:
             state = "❌ **한도 초과**"
-        # 2순위: 현재 선택된 모델인지 체크 (🔥 표시)
         elif model == bot.active_model:
             state = "🔥 **작동 중**"
-        # 3순위: 대기 중인 모델 (순위 표시)
         else:
             state = f"{i}순위"
             
