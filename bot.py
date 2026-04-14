@@ -293,10 +293,10 @@ async def on_message(message):
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
 
                 for model_name in available_models:
-                    try:
+                    try:  # <--- try 시작
                         bot.active_model = model_name
                         
-                        # Gemma와 Gemini 공통 처리 (full_content 사용)
+                        # 모델별 호출 로직
                         if "gemma" in model_name:
                             prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
                             response = client.models.generate_content(model=model_name, contents=prompt)
@@ -307,33 +307,33 @@ async def on_message(message):
                                 config={'system_instruction': system_instruction}
                             )
                         
-# --- Gemini 답변 생성 및 처리 로직 ---
-            if response and response.text:
-                full_text = response.text  # <- 여기서부터 한 칸(스페이스 4칸) 더 들어가야 해요!
-                score_change = 0
-                
-                # 1. 점수 파싱 로직
-                if "[SCORE:" in full_text:
-                    try:
-                        parts = full_text.split("[SCORE:")
-                        clean_res = parts[0].strip()
-                        score_val = parts[1].split("]")[0].strip()
-                        score_change = int(score_val)
-                    except:
-                        clean_res = full_text
-                else:
-                    clean_res = full_text
+                        # --- 답변 처리 로직 (들여쓰기 중요!) ---
+                        if response and response.text:
+                            full_text = response.text
+                            score_change = 0
+                            
+                            # 1. 점수 파싱
+                            if "[SCORE:" in full_text:
+                                try:
+                                    parts = full_text.split("[SCORE:")
+                                    clean_res = parts[0].strip()
+                                    score_val = parts[1].split("]")[0].strip()
+                                    score_change = int(score_val)
+                                except:
+                                    clean_res = full_text
+                            else:
+                                clean_res = full_text
 
-                # 2. 메시지 전송 및 데이터 업데이트 (진짜 사람일 때만)
-                if not message.author.bot:
-                    await message.reply(clean_res)
-                    save_to_memory(user_name, message.content, clean_res)
-                    update_user_affinity(user_id, user_name, score_change)
-                
-                success = True
-                break
+                            # 2. 전송 및 업데이트 (사람일 때만)
+                            if not message.author.bot:
+                                await message.reply(clean_res)
+                                save_to_memory(user_name, message.content, clean_res)
+                                update_user_affinity(user_id, user_name, score_change)
+                            
+                            success = True
+                            break # 성공했으므로 루프 탈출
 
-                    except Exception as e:
+                    except Exception as e: # <--- try의 짝꿍 except
                         last_error = str(e).upper()
                         if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
                             lock_model(model_name)
