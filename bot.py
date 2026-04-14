@@ -234,7 +234,7 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-# 뜌비가 언급되었거나 이름이 포함된 경우
+    # 뜌비가 언급되었거나 이름이 포함된 경우
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         if bot.is_processing:
             return
@@ -251,13 +251,7 @@ async def on_message(message):
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-                # 2. 성격에 따른 컨텐츠 및 지시문 구성
-                if bot.current_personality == "기본":
-                    full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
-                else:
-                    full_content = message.content
-
-                # 3. 친밀도 단계 설정
+                # 2. 성격 및 친밀도에 따른 태도 결정
                 if affinity <= -31:
                     attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
                 elif -30 <= affinity <= -1:
@@ -269,29 +263,37 @@ async def on_message(message):
                 else:
                     attitude = "절친 상태. 무한한 신뢰와 깊은 애정을 표현함."
 
+                # 3. 입력 컨텐츠 구성 (기본 성격일 때만 기억 포함)
+                if bot.current_personality == "기본":
+                    full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
+                else:
+                    full_content = message.content
+
                 # 4. 최종 시스템 지시문 완성
                 system_instruction = (
                     f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 {'창조주 슈비님' if is_shuvi else f'유저 {user_name}'}이야.\n"
                     f"현재 상대와의 심리적 친밀도 단계: {attitude}\n"
                     f"너의 현재 성격 컨셉: {personality_guide}\n"
                     f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘.\n\n"
-                    "[친밀도 산정 절대 원칙]\n1. 유저의 태도를 우선하여 점수를 매긴다.\n2. 긍정 표현 시 무조건 +10~20점.\n3. 욕설/비하 시에만 마이너스 점수.\n4. 답변 끝에 반드시 [SCORE: 수치] 포함."
+                    "[친밀도 산정 절대 원칙]\n"
+                    "1. 유저의 태도를 우선하여 점수를 매긴다.\n"
+                    "2. 긍정 표현 시 무조건 +10~20점.\n"
+                    "3. 욕설/비하 시에만 마이너스 점수.\n"
+                    "4. 답변 끝에 반드시 [SCORE: 수치] 포함."
                 )
 
                 # 5. 모델 순회하며 답변 생성
                 success = False
-                last_error_type = ""
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
 
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
-                        # 5초 타임아웃으로 쾌적함 유지
                         response = client.models.generate_content(
                             model=model_name,
                             contents=full_content,
                             config={'system_instruction': system_instruction},
-                            http_options={'timeout': 5.0}
+                            http_options={'timeout': 8.0} # 타임아웃 살짝 여유있게 조정
                         )
                         
                         if response and response.text:
@@ -303,7 +305,7 @@ async def on_message(message):
                                     parts = full_text.split("[SCORE:")
                                     clean_res = parts[0].strip()
                                     score_val = parts[1].split("]")[0].strip()
-                                    score_change = int(score_val)
+                                    score_change = int(score_val.replace("+", ""))
                                 except:
                                     clean_res = full_text
                             else:
@@ -319,25 +321,14 @@ async def on_message(message):
                     except Exception as e:
                         err_str = str(e).upper()
                         print(f"⚠️ {model_name} 실패: {err_str}")
-                        if any(x in err_str for x in ["503", "UNAVAILABLE"]):
-                            last_error_type = "503"
-                            break 
-                        elif any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
-                            last_error_type = "429"
+                        if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
                             lock_model(model_name)
-                            continue
-                        else:
-                            continue
+                        continue
 
                 if not success:
-                    if last_error_type == "503":
-                        await message.reply("지금 구글 서버가 너무 바빠서 뜌비가 잠시 대답을 못 한대... 😭 조금 이따가 다시 불러줘!")
-                    elif last_error_type == "429":
-                        await message.reply("오늘 뜌비가 너무 많이 떠들었나 봐! 기운이 다 빠져서 내일 다시 올게. 💤")
-                    else:
-                        await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
+                    await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 나중에 다시 불러줘! 😭")
 
-		except Exception as top_e:
+        except Exception as top_e:
             print(f"❌ 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
