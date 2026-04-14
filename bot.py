@@ -566,12 +566,12 @@ async def your_gemini_function(user, text):
             # response.text가 존재할 때만 처리하도록 안전장치 추가
             try:
                 reply_text = response.text
-                print(f"🤖 [뜌비 답변]: {reply_text}")
+            print(f"🤖 [뜌비 답변]: {reply_text}")
 
                 # 2. 텍스트 채널에 기록 남기 (작업방 ID 사용)
-                channel = bot.get_channel(WORK_CHANNEL_ID)
-                if channel:
-                    await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
+            channel = bot.get_channel(WORK_CHANNEL_ID)
+            if channel:
+                await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
 
                 # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
                 # 예: await play_tts_voice(reply_text)
