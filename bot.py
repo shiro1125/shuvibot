@@ -144,7 +144,7 @@ def get_user_affinity(user_id, user_name):
 
 def update_user_affinity(user_id, user_name, amount):
     try:
-        # 1. 기존 데이터(친밀도와 대화 횟수) 가져오기
+        # 1. 기존 데이터 가져오기
         res = supabase.table("user_stats").select("affinity, chat_count").eq("user_id", user_id).execute()
         
         if res.data:
@@ -158,7 +158,7 @@ def update_user_affinity(user_id, user_name, amount):
         new_affinity = current_affinity + amount
         new_chat_count = current_chat_count + 1
         
-        # 3. DB 업데이트 (last_chatted_at 제외하고 upsert로 수정)
+        # 3. DB 업데이트
         supabase.table("user_stats").upsert({
             "user_id": user_id, 
             "user_name": user_name, 
@@ -166,7 +166,11 @@ def update_user_affinity(user_id, user_name, amount):
             "chat_count": new_chat_count
         }).execute()
         
-        print(f"✅ {user_name} 친밀도 업데이트 완료: {new_affinity}")
+        # --- 수정된 로그 출력 부분 ---
+        diff_str = f"+{amount}" if amount >= 0 else f"{amount}"
+        print(f"✅ {user_name} 친밀도 업데이트: {current_affinity} -> {new_affinity} ({diff_str})")
+        # ---------------------------
+
     except Exception as e:
         print(f"❌ 친밀도 업데이트 실패: {e}")
 		
