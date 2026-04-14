@@ -243,7 +243,6 @@ for model_name in MODEL_LIST:
                         full_text = response.text
                         score_change = 1
                         
-                        # [SCORE:] 태그 분리 및 점수 추출
                         if "[SCORE:" in full_text:
                             try:
                                 parts = full_text.split("[SCORE:")
@@ -255,13 +254,9 @@ for model_name in MODEL_LIST:
                         else:
                             clean_res = full_text
 
-                        # 답변 출력 및 저장
                         await message.reply(clean_res)
                         save_to_memory(user_name, message.content, clean_res)
-
-                        # --- 핵심 수정 부분: 변수 계산 대신 함수를 호출하여 최신 DB 값에 더함 ---
                         update_user_affinity(user_id, user_name, score_change)
-                        # --------------------------------------------------------
                         
                         bot.active_model = model_name
                         success = True
