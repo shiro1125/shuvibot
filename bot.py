@@ -337,21 +337,22 @@ async def on_message(message):
                     else:
                         await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
 
-        except Exception as top_e:
+except Exception as top_e:
             print(f"❌ 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
             bot.active_model = "대기 중"
 
-                # 2. 성격에 따른 메모리 필터링
-                if bot.current_personality == "기본":
-                    full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
-                else:
-                    full_content = message.content
+        # 👇 여기서부터 들여쓰기를 왼쪽으로 한 칸(4스페이스) 당겨야 합니다!
+        # 2. 성격에 따른 메모리 필터링
+        if bot.current_personality == "기본":
+            full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
+        else:
+            full_content = message.content
 
-                # 3. 친밀도에 따른 태도(attitude) 결정
-                if affinity <= -31:
-                    attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+        # 3. 친밀도에 따른 태도(attitude) 결정
+        if affinity <= -31:
+            attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
                 elif -30 <= affinity <= -1:
                     attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
                 elif 0 <= affinity <= 30:
