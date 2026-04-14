@@ -196,7 +196,7 @@ def update_user_affinity(user_id, user_name, amount):
         }).execute()
 
         diff_str = f"+{amount}" if amount >= 0 else f"{amount}"
-        print(f"✅ {user_name} 친밀도 업데이트: {current_affinity} -> {new_affinity} ({diff_str})")
+        print(f"✅ {user_name} 친밀도 업데이트: {current_affinity} -> {new_affinity} ({diff_str})", flush=True)
 
     except Exception as e:
         print(f"❌ 친밀도 업데이트 실패: {e}")
