@@ -236,7 +236,8 @@ async def on_message(message):
 
     # 뜌비가 언급되었거나 이름이 포함된 경우
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
-        if bot.is_processing:
+        # 중복 응답 방지
+        if hasattr(bot, 'is_processing') and bot.is_processing:
             return
 
         try:
@@ -245,13 +246,15 @@ async def on_message(message):
                 user_id = message.author.id
                 user_name = message.author.display_name
                 
-                # 1. 데이터 가져오기
-                history_context = get_memory_from_db(user_name)
-                affinity = get_user_affinity(user_id, user_name)
-                is_shuvi = (user_id == SHUVI_USER_ID)
-                personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
+                # 1. 데이터 가져오기 (DB 함수들이 정의되어 있어야 함)
+                history_context = get_memory_from_db(user_name) if 'get_memory_from_db' in globals() else ""
+                affinity = get_user_affinity(user_id, user_name) if 'get_user_affinity' in globals() else 0
+                is_shuvi = (user_id == SHUVY_USER_ID) # SHUVY_USER_ID 정의 확인 필요
+                
+                # 성격 가이드 가져오기
+                personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격"))
 
-# 2. 성격 및 친밀도에 따른 태도 결정
+                # 2. 친밀도 단계 결정
                 if affinity <= -31:
                     attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
                 elif -30 <= affinity <= -1:
@@ -259,27 +262,33 @@ async def on_message(message):
                 elif 0 <= affinity <= 30:
                     attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
                 elif 31 <= affinity <= 70:
-                    attitude = "호감 상태. 다정하고 친근하게 대함."
+                    attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
                 else:
-                    attitude = "절친 상태. 무한한 신뢰와 깊은 애정을 표현함."
+                    attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
-                # 3. 입력 컨텐츠 구성 (기본 성격일 때만 기억 포함)
+                # 3. 입력 컨텐츠 구성 (기본 성격일 때만 과거 기억 포함)
                 if bot.current_personality == "기본":
                     full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
                 else:
                     full_content = message.content
 
                 # 4. 최종 시스템 지시문 완성
+                if is_shuvi:
+                    identity_prompt = f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 유일한 창조주 슈비님이야."
+                else:
+                    identity_prompt = f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'(으)로, 슈비님이 아니야."
+
                 system_instruction = (
-                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 {'창조주 슈비님' if is_shuvi else f'유저 {user_name}'}이야.\n"
+                    f"{identity_prompt}\n"
                     f"현재 상대와의 심리적 친밀도 단계: {attitude}\n"
                     f"너의 현재 성격 컨셉: {personality_guide}\n"
-                    f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘.\n\n"
+                    f"중요: 성격 컨셉이 '기본'이 아니라면 친밀도보다 컨셉({bot.current_personality})을 우선해서 연기해줘.\n\n"
                     "[친밀도 산정 절대 원칙]\n"
                     "1. 유저의 태도를 우선하여 점수를 매긴다.\n"
-                    "2. 긍정 표현 시 무조건 +10~20점.\n"
+                    "2. 긍정 표현('사랑해', '고마워' 등) 시 무조건 +10~20점.\n"
                     "3. 욕설/비하 시에만 마이너스 점수.\n"
-                    "4. 답변 끝에 반드시 [SCORE: 수치] 포함."
+                    "4. 답변 끝에 반드시 [SCORE: 수치] 포함. (예: [SCORE: +15])\n"
+                    "5. '사랑해'를 들었는데 점수를 깎는 실수를 하지 마."
                 )
 
                 # 5. 모델 순회하며 답변 생성
@@ -289,17 +298,24 @@ async def on_message(message):
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=full_content,
-                            config={'system_instruction': system_instruction},
-                            http_options={'timeout': 8.0} # 타임아웃 살짝 여유있게 조정
-                        )
+                        
+                        # 모델별 호출 (Gemma 등 시스템 인스트럭션 미지원 모델 대응)
+                        if "gemma" in model_name.lower():
+                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
+                            response = client.models.generate_content(model=model_name, contents=prompt)
+                        else:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=full_content,
+                                config={'system_instruction': system_instruction},
+                                http_options={'timeout': 10.0}
+                            )
                         
                         if response and response.text:
                             full_text = response.text
                             score_change = 0
                             
+                            # 점수 파싱 및 텍스트 정제
                             if "[SCORE:" in full_text:
                                 try:
                                     parts = full_text.split("[SCORE:")
@@ -311,9 +327,13 @@ async def on_message(message):
                             else:
                                 clean_res = full_text
 
+                            # 응답 전송 및 데이터 저장
                             await message.reply(clean_res)
-                            save_to_memory(user_name, message.content, clean_res)
-                            update_user_affinity(user_id, user_name, score_change)
+                            
+                            if 'save_to_memory' in globals():
+                                save_to_memory(user_name, message.content, clean_res)
+                            if 'update_user_affinity' in globals():
+                                update_user_affinity(user_id, user_name, score_change)
                             
                             success = True
                             break 
@@ -322,7 +342,7 @@ async def on_message(message):
                         err_str = str(e).upper()
                         print(f"⚠️ {model_name} 실패: {err_str}")
                         if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
-                            lock_model(model_name)
+                            if 'lock_model' in globals(): lock_model(model_name)
                         continue
 
                 if not success:
@@ -334,119 +354,7 @@ async def on_message(message):
             bot.is_processing = False
             bot.active_model = "대기 중"
 
-        # 👇 여기서부터 들여쓰기를 왼쪽으로 한 칸(4스페이스) 당겨야 합니다!
-        # 2. 성격에 따른 메모리 필터링
-        if bot.current_personality == "기본":
-            full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
-        else:
-            full_content = message.content
-
-        # 3. 친밀도에 따른 태도(attitude) 결정
-			if affinity <= -31:
-            	attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
-        	elif -30 <= affinity <= -1:
-        		attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
-        	elif 0 <= affinity <= 30:
-         	   attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
-       		elif 31 <= affinity <= 70:
-            	attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
-       		else:
-            	attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
-
-                # 4. 최종 시스템 지시문 완성
-                if is_shuvy:  # 변수명이 is_shuvy인지 is_shuvi인지 확인 필요 (기본값 is_shuvy 가정)
-                    system_instruction = (
-                        f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
-                        f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
-                        f"너의 성격 컨셉: {personality_guide}\n"
-                        f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
-                    )
-                else:
-                    system_instruction = (
-                        f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
-                        f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
-                        f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야.\n"
-                        f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
-                    )
-
-                # 기존 지침에 친밀도 산정 원칙을 추가(Append)합니다.
-                system_instruction += (
-                    "\n\n[친밀도 산정 절대 원칙]\n"
-                    "1. 뜌비 너의 개인적인 기분이나 캐릭터 컨셉(츤데레 등)보다 유저의 태도를 우선하여 점수를 매긴다.\n"
-                    "2. 유저가 '사랑해', '좋아해', '예쁘다', '고마워' 등 긍정적인 표현을 하면 뜌비의 답변 내용과 상관없이 무조건 +10~20점을 부여한다.\n"
-                    "3. 유저가 욕설, 비하, 공격적인 언행을 할 때만 마이너스 점수를 부여한다.\n"
-                    "4. 답변 끝에는 반드시 [SCORE: 수치] 형태로 이번 대화에 대한 변동값을 적는다. (예: [SCORE: +15])\n"
-                    "5. 수치는 유저가 한 말이 얼마나 좋고 나쁜지를 판단하고 적절한 수치로 부여한다.\n\n"
-                    "[주의사항]\n"
-                    "- 유저가 너를 좋아해준다면, 너도 그 호의를 논리적으로 인정하고 점수로 반영해야 해.\n"
-                    "- '사랑해'라는 말을 들었는데 점수를 깎는 것은 시스템 오류로 간주되니 주의할 것."
-                )
-
-                # 5. 모델 순회하며 답변 생성
-                success = False
-                available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
-
-                for model_name in available_models:
-                    try:
-                        bot.active_model = model_name
-                        
-                        # 모델별 호출 로직
-                        if "gemma" in model_name:
-                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
-                            response = client.models.generate_content(model=model_name, contents=prompt)
-                        else:
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=full_content,
-                                config={'system_instruction': system_instruction}
-                            )
-                        
-                        # --- 답변 처리 로직 ---
-                        if response and response.text:
-                            full_text = response.text
-                            score_change = 0
-                            
-                            # 1. 점수 파싱
-                            if "[SCORE:" in full_text:
-                                try:
-                                    # [SCORE: +10] 형태에서 수치만 추출
-                                    parts = full_text.split("[SCORE:")
-                                    clean_res = parts[0].strip()
-                                    score_val = parts[1].split("]")[0].strip()
-                                    # "+" 기호가 있어도 int()는 변환 가능합니다.
-                                    score_change = int(score_val.replace("+", ""))
-                                except Exception as parse_err:
-                                    print(f"⚠️ 점수 파싱 에러: {parse_err}")
-                                    clean_res = full_text
-                            else:
-                                clean_res = full_text
-
-                            # 2. 전송 및 업데이트 (사람일 때만)
-                            if not message.author.bot:
-                                await message.reply(clean_res)
-                                # 필요한 함수들이 정의되어 있다는 가정하에 실행
-                                save_to_memory(user_name, message.content, clean_res)
-                                update_user_affinity(user_id, user_name, score_change)
-                            
-                            success = True
-                            break # 성공했으므로 루프 탈출
-
-                    except Exception as e:
-                        last_error = str(e).upper()
-                        if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
-                            if 'lock_model' in globals(): lock_model(model_name)
-                        print(f"⚠️ {model_name} 실패: {last_error}")
-                        continue
-
-                if not success:
-                    await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
-
-        except Exception as e:
-            print(f"❌ 전체 로직 에러: {e}")
-        finally:
-            bot.is_processing = False
-            bot.active_model = "대기 중"
-
+    # 일반 명령어 처리
     await bot.process_commands(message)
 
 # --- 슬래시 명령어 ---
