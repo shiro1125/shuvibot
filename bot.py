@@ -308,26 +308,32 @@ async def on_message(message):
                             )
                         
                         if response and response.text:
-                            full_text = response.text
-                            score_change = 0
-                            
-                            if "[SCORE:" in full_text:
-                                try:
-                                    parts = full_text.split("[SCORE:")
-                                    clean_res = parts[0].strip()
-                                    score_val = parts[1].split("]")[0].strip()
-                                    score_change = int(score_val)
-                                except:
-                                    clean_res = full_text
-                            else:
-                                clean_res = full_text
+                full_text = response.text
+                score_change = 0
+                
+                # 1. 점수 파싱 로직
+                if "[SCORE:" in full_text:
+                    try:
+                        parts = full_text.split("[SCORE:")
+                        clean_res = parts[0].strip()
+                        score_val = parts[1].split("]")[0].strip()
+                        score_change = int(score_val)
+                    except:
+                        clean_res = full_text
+                else:
+                    clean_res = full_text
 
-                            await message.reply(clean_res)
-                            save_to_memory(user_name, message.content, clean_res)
-                            update_user_affinity(user_id, user_name, score_change)
-                            
-                            success = True
-                            break 
+                # 2. 메시지 전송 및 데이터 업데이트
+                # ✅ [중요] 메시지 작성자가 봇이 아닐 때만 점수를 업데이트함
+                if not message.author.bot:
+                    await message.reply(clean_res)
+                    save_to_memory(user_name, message.content, clean_res)
+                    
+                    # 진짜 유저일 때만 친밀도 함수 호출!
+                    update_user_affinity(user_id, user_name, score_change)
+                
+                success = True
+                break
 
                     except Exception as e:
                         last_error = str(e).upper()
