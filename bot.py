@@ -200,17 +200,17 @@ async def on_message(message):
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-              # [슈비님 로직 수정] 0점 기준 친밀도 단계 설정
-				if affinity <= -31:
-   					attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
-				elif -30 <= affinity <= -1:
-  					attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
-				elif 0 <= affinity <= 30:
-   					attitude = "비즈니스 상태. 감정 없는 무미건조하고 딱딱한 태도."
-				elif 31 <= affinity <= 70:
-   					attitude = "호감 상태. 다정하고 친근하게 대함."
-				else:
- 					attitude = "절친/가족 상태. 무한한 신뢰와 깊은 애정을 표현함."
+# [슈비님 로직 수정] 0점 기준 친밀도 단계 설정 (스페이스 정렬 완료)
+                if affinity <= -31:
+                    attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+                elif -30 <= affinity <= -1:
+                    attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+                elif 0 <= affinity <= 30:
+                    attitude = "비즈니스 상태. 감정 없는 무미건조하고 딱딱한 태도."
+                elif 31 <= affinity <= 70:
+                    attitude = "호감 상태. 다정하고 친근하게 대함."
+                else:
+                    attitude = "절친/가족 상태. 무한한 신뢰와 깊은 애정을 표현함."
 
                 # 2. 시스템 지침 설정
                 if is_shuvi:
