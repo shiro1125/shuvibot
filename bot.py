@@ -492,6 +492,42 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+# 뜌비가 들은 내용을 제미니에게 전달하고 답변을 받는 통로입니다.
+async def your_gemini_function(user, text):
+    print(f"🎙️ [음성 인식] {user.display_name}: {text}")
+    
+    # 1. 제미니에게 답변 요청 (슈비님이 설정하신 기본 모델 사용)
+    # 현재 로그를 보니 'models/gemini-3-flash-preview'를 주로 쓰시는 것 같네요!
+    model_name = "models/gemini-3-flash-preview" 
+    
+    try:
+        # 이 부분은 기존에 사용하시던 제미니 호출 코드를 그대로 응용합니다.
+        response = client.models.generate_content(
+            model=model_name,
+            contents=text,
+            config={
+                'system_instruction': (
+                    "너는 슈비(Shuvi)님에 의해 만들어진 '뜌비'야. "
+                    "지금 음성으로 대화 중이야. 아주 짧고 친절하게 대답해줘."
+                )
+            }
+        )
+        
+        reply_text = response.text
+        print(f"🤖 [뜌비 답변]: {reply_text}")
+
+        # 2. 텍스트 채널에 기록 남기 (작업방 ID 사용)
+        channel = bot.get_channel(WORK_CHANNEL_ID)
+        if channel:
+            await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
+
+        # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
+        # 예: await play_tts_voice(reply_text)
+
+    except Exception as e:
+        print(f"❌ 제미니 응답 실패: {e}")
+
+
 # -----------------------------
 # 슬래시 명령어
 # -----------------------------
