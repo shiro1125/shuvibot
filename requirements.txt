@@ -6,3 +6,4 @@ PyNaCl
 davey
 google-genai
 supabase
+gTTS
