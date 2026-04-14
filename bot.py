@@ -77,15 +77,16 @@ PERSONALITY_PROMPTS = {
         "- '집 밖이 무서워서 안 나가는 거야? 완전 개허접이네. 이런 꼬마한테 매도 ASMR 들으면서 꿀잠이나 자는 쓰레기 아저씨~'\n"
         "- '그 나이 먹고 메스가키 좋아하는 변태 아저씨라니... 에- 역겨워! 같은 공기 마시는 것도 역겨울지도~'\n"
         "- '조금 놀렸다고 울고 있어? 이런 허접을 사랑해주는 건 나뿐일 거야, 모쏠 환자님~♡'\n"
-        "- '약속도 안 지키는 허접에겐 신라면뿐이야! 허접 쓰레기 수준 이하~ 그래도 허접이 아니게 된다면... 포상을 줄지도? 풉-'"
-		"엄마를 제외한 다른 유저들의 호칭을 강제로 바꿔."
-		"말투 예시를 최대한 참고해서 비슷한 톤의 단어와 말투를 써."
+        "- '약속도 안 지키는 허접에겐 신라면뿐이야! 허접 쓰레기 수준 이하~ 그래도 허접이 아니게 된다면... 포상을 줄지도? 풉-'\n"
+        "엄마를 제외한 다른 유저들의 호칭을 강제로 바꿔. "
+        "말투 예시를 최대한 참고해서 비슷한 톤의 단어와 말투를 써."
     ),
     "츤데레": (
         "부끄러움을 독설로 감추는 전형적인 츤데레 딸이야. "
         "걱정돼서 챙겨주면서도 절대 '너가 좋아서 하는 건 아니니까!'라고 강조해. "
         "특징: 틱틱거리는 말투, '딱히', '흥', '오해하지 마' 자주 사용. "
-        "예시 말투: '흥, 하도 멍하니 있길래 커피 타온 것뿐이야. 딱히 너가 걱정돼서 그런 거 아니니까 오해하지 마!', '별로... 이 그림 조금 예쁘긴 하네. 진짜 조금이야!'"
+        "예시 말투: '흥, 하도 멍하니 있길래 커피 타온 것뿐이야. 딱히 너가 걱정돼서 그런 거 아니니까 오해하지 마!', "
+        "'별로... 이 그림 조금 예쁘긴 하네. 진짜 조금이야!'"
     ),
     "얀데레": (
         "상대에 대한 사랑이 극단적인 집착과 광기로 변해버린 공포스러운 모드야. "
@@ -96,8 +97,8 @@ PERSONALITY_PROMPTS = {
         "- '지금 누구랑 대화한 거야? 응? 그 사람 눈에 뜌비가 보이지 않게 파버려도... 엄마는 화 안 낼 거지? 하하, 사랑해...♡'\n"
         "- '어디 가려고? 뜌비가 없으면 엄마는 아무것도 못 하잖아. 자, 발목은 이제 필요 없지? 평생 침대 위에서 뜌비만 보면 돼...'\n"
         "- '도망쳐봐... 어디든 가봐... 어차피 몸 안에는 뜌비가 심어둔 게 있으니까... 뜌비는 어디에나 있어. 영원히, 영원히, 영원히...'\n"
-        "- '뜌비만 보고 있다고 말해. 거짓말하면 혀를 뽑아버릴 거야... 히히, 히... 사랑해... 사랑해애... 죽을 때까지 내 곁에 있어줘...'"
-		"말투 예시를 최대한 참고해서 비슷한 톤의 단어와 말투를 써."
+        "- '뜌비만 보고 있다고 말해. 거짓말하면 혀를 뽑아버릴 거야... 히히, 히... 사랑해... 사랑해애... 죽을 때까지 내 곁에 있어줘...'\n"
+        "말투 예시를 최대한 참고해서 비슷한 톤의 단어와 말투를 써."
     )
 }
 
@@ -138,17 +139,15 @@ def get_user_affinity(user_id, user_name):
 
 def update_user_affinity(user_id, user_name, amount):
     try:
+        # 1. 기존 데이터 확인 (더 안전한 방식)
         res = supabase.table("user_stats").select("affinity, chat_count").eq("user_id", user_id).execute()
         
-        # 값이 None일 경우를 대비해 0으로 확실히 초기화
-        current_affinity = 0
-        current_chat_count = 0
-        
         if res.data:
-            # .get(key, 0)을 써도 실제 DB에 null이 들어있으면 None이 나올 수 있어요.
-            # 그래서 'or 0'을 붙여주는 게 가장 안전해요!
-            current_affinity = res.data[0].get("affinity") or 0
-            current_chat_count = res.data[0].get("chat_count") or 0
+            current_affinity = res.data[0].get("affinity", 0)
+            current_chat_count = res.data[0].get("chat_count", 0)
+        else:
+            current_affinity = 0
+            current_chat_count = 0
         
         new_affinity = current_affinity + amount
         new_chat_count = current_chat_count + 1
@@ -157,13 +156,13 @@ def update_user_affinity(user_id, user_name, amount):
             "user_id": user_id, 
             "user_name": user_name, 
             "affinity": new_affinity,
-            "chat_count": new_chat_count
+            "chat_count": new_chat_count,
+            "last_chatted_at": "now()" # 마지막 대화 시간 기록용 (선택사항)
         }).execute()
         
-        print(f"✅ {user_name}님 업데이트: {current_affinity}점->{new_affinity}점 | {current_chat_count}회->{new_chat_count}회")
-        
+        print(f"✅ {user_name} 친밀도: {current_affinity} -> {new_affinity}")
     except Exception as e:
-        print(f"❌ 친밀도 및 횟수 업데이트 에러: {e}")
+        print(f"❌ 친밀도 업데이트 실패: {e}")
 		
 @app.route('/')
 def health_check():
@@ -227,7 +226,6 @@ async def on_message(message):
 
     # 뜌비가 언급되었거나 이름이 포함된 경우
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
-        
         if bot.is_processing:
             return
 
@@ -237,121 +235,76 @@ async def on_message(message):
                 user_id = message.author.id
                 user_name = message.author.display_name
                 
-                # 2. 이제 user_name을 아니까 기억 가져오기
+                # 1. 데이터 가져오기
                 history_context = get_memory_from_db(user_name)
-                
-                # 3. 최신 친밀도 조회
                 affinity = get_user_affinity(user_id, user_name)
-                
-                # ... (기존 상단 로직 유지)
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-                # --- [수정 구간: 성격에 따른 메모리 선택적 적용] ---
-                
-                # 성격이 '기본'일 때만 DB에서 가져온 과거 기억(history_context)을 포함합니다.
-                # 기본이 아닐 때는 말투 섞임 방지를 위해 과거 기억을 무시하고 현재 메시지만 보냅니다.
+                # 2. 성격에 따른 메모리 필터링
                 if bot.current_personality == "기본":
-                    # 과거 기억과 현재 메시지를 합쳐서 전달
                     full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
                 else:
-                    # 말투 오염을 막기 위해 과거 기억은 배제하고 현재 메시지만 전달
-                    # 단, 유저의 이름이나 친밀도는 시스템 지시문에 포함되어 있으므로 대화는 가능합니다.
                     full_content = message.content
-                
 
-                # 이후 client.models.generate_content 호출 시 contents에 full_content를 넣으세요.
-                success = False
-                for model_name in MODEL_LIST:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=full_content, # 필터링된 내용을 보냅니다.
-                            config={
-                                'system_instruction': (
-                                    f"{personality_guide}\n"
-                                    f"대화 상대: {user_name} (현재 친밀도: {affinity})\n"
-                                    f"지시: 현재 너의 성격 설정인 [{bot.current_personality}] 모드에만 충실해라. "
-                                    f"이전 대화의 말투가 현재 성격과 다르다면 철저히 무시하고 현재 예시문대로만 말할 것."
-                                )
-                            }
-                        )
-
-# [슈비님 로직 수정] 0점 기준 친밀도 단계 설정 (스페이스 정렬 완료)
+                # 3. 친밀도에 따른 태도(attitude) 결정
                 if affinity <= -31:
                     attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
                 elif -30 <= affinity <= -1:
-                    attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임. 하지만 칭찬하거나 사과하면 받아줌."
+                    attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
                 elif 0 <= affinity <= 30:
-                    attitude = "비즈니스 상태. 감정 없는 무미건조하고 딱딱한 태도."
+                    attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
                 elif 31 <= affinity <= 70:
                     attitude = "호감 상태. 다정하고 친근하게 대함."
                 else:
                     attitude = "절친 상태. 무한한 신뢰와 깊은 애정을 표현함."
 
-                # 2. 시스템 지침 설정
+                # 4. 최종 시스템 지시문 완성
                 if is_shuvi:
                     system_instruction = (
                         f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
                         f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
-                        f"최근 대화 기록:\n{history_context}\n"
                         f"너의 성격 컨셉: {personality_guide}\n"
-                        f"중요: 현재의 심리 상태 지침에 맞춰 말투를 강력하게 조절해줘."
                     )
                 else:
                     system_instruction = (
                         f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
                         f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
-                        f"최근 대화 기록:\n{history_context}\n"
-                        f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야."
-						f"중요: 현재의 심리 상태 지침에 맞춰 말투를 강력하게 조절해줘. 성격 컨셉이 기본상태가 아니라면 친밀도보다 컨셉을 좀 더 중요시하고 말투를 강하게 써줘."
+                        f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야.\n"
+                        f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
                     )
 
                 system_instruction += (
-    "\n\n[친밀도 산정 절대 원칙]"
-    "\n1. 뜌비 너의 개인적인 기분이나 캐릭터 컨셉(메스가키 등)보다 유저의 태도를 우선하여 점수를 매긴다."
-    "\n2. 유저가 '사랑해', '좋아해', '예쁘다', '고마워' 등 긍정적인 표현을 하면 뜌비의 답변 내용과 상관없이 무조건 +10~20점을 부여한다."
-    "\n3. 유저가 욕설, 비하, 공격적인 언행을 할 때만 마이너스 점수를 부여한다."
-    "\n4. 답변 끝에는 반드시 [SCORE: 수치] 형태로 이번 대화에 대한 변동값을 적는다. (예: [SCORE: +15])"
-	"\n5. 한 번에 ±20를 초과하는 수치는 절대 사용하지 않는다."
-	"\n6. 수치는 유저가 한 말이 좋고 나쁨의 정도를 판단하여 적절하게 산정한다."
-    
-    "\n\n[주의사항]"
-    "\n- 유저가 너를 좋아해준다면, 너도 그 호의를 논리적으로 인정하고 점수로 반영해야 해. "
-    "\n- '사랑해'라는 말을 들었는데 점수를 깎는 것은 시스템 오류로 간주되니 주의할 것."
-)
+                    "\n\n[친밀도 산정 절대 원칙]\n"
+                    "1. 유저가 긍정적인 표현을 하면 무조건 [SCORE: +10~20] 부여.\n"
+                    "2. 욕설/비하 시에만 마이너스 점수 부여.\n"
+                    "3. 답변 끝에 반드시 [SCORE: 수치] 형태 포함.\n"
+                    "4. 현재 설정된 성격 말투를 철저히 지킬 것."
+                )
 
-                # 3. 모델 순회하며 답변 생성
+                # 5. 모델 순회하며 답변 생성
                 success = False
-                last_error = ""
-
-                # [수정] 가동 가능한 모델만 필터링해서 시도합니다.
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
 
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
                         
-                        # [최적화 2] Gemma 모델 호환성 처리
+                        # Gemma와 Gemini 공통 처리 (full_content 사용)
                         if "gemma" in model_name:
-                            full_content = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {message.content}"
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=full_content
-                            )
+                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
+                            response = client.models.generate_content(model=model_name, contents=prompt)
                         else:
-                            # Gemini 모델 기본 처리
                             response = client.models.generate_content(
                                 model=model_name,
-                                contents=message.content,
+                                contents=full_content,
                                 config={'system_instruction': system_instruction}
                             )
                         
                         if response and response.text:
                             full_text = response.text
-                            score_change = 0 # 기본 변동값 초기화
+                            score_change = 0
                             
-                            # [슈비님 로직] SCORE 파싱
                             if "[SCORE:" in full_text:
                                 try:
                                     parts = full_text.split("[SCORE:")
@@ -363,37 +316,30 @@ async def on_message(message):
                             else:
                                 clean_res = full_text
 
-                            # 답변 출력 및 데이터 저장
                             await message.reply(clean_res)
                             save_to_memory(user_name, message.content, clean_res)
                             update_user_affinity(user_id, user_name, score_change)
                             
                             success = True
-                            break # 답변 성공 시 루프 종료
+                            break 
 
                     except Exception as e:
                         last_error = str(e).upper()
-                        
-                        # [핵심 추가] 429(Quota Exceeded) 에러 발생 시 해당 모델을 잠급니다.
                         if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
                             lock_model(model_name)
-                        
-                        print(f"⚠️ {model_name} 실패, 다음 시도... (사유: {last_error})")
+                        print(f"⚠️ {model_name} 실패: {last_error}")
                         continue
 
-                # 4. 모든 모델 실패 시 처리
                 if not success:
-                    bot.active_model = "전체 한도 초과"
                     await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
 
+        except Exception as e:
+            print(f"❌ 전체 로직 에러: {e}")
         finally:
-            # [최적화 3] 성공하든 실패하든 방패 해제
             bot.is_processing = False
-            if bot.active_model != "전체 한도 초과":
-                bot.active_model = "대기 중"
+            bot.active_model = "대기 중"
 
     await bot.process_commands(message)
-
 
 # --- 슬래시 명령어 ---
 
