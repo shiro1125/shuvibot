@@ -10,3 +10,5 @@ gTTS
 edge-tts
 requests
 python-dotenv
+discord-ext-voice-recv
+openai-whisper
