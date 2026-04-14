@@ -11,6 +11,7 @@ from threading import Thread
 from dotenv import load_dotenv
 from google import genai
 from supabase import create_client, Client
+from stt import SpeechToText, BasicSink
 
 # 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
@@ -493,6 +494,22 @@ async def on_message(message):
 # -----------------------------
 # 슬래시 명령어
 # -----------------------------
+
+@bot.tree.command(name="듣기시작", description="뜌비가 목소리를 듣고 답변합니다.")
+async def start_listening(interaction: discord.Interaction):
+    if interaction.user.voice:
+        # voice_recv 기능을 사용해서 채널 접속
+        vc = await interaction.user.voice.channel.connect(cls=voice_recv.VoiceRecvClient)
+        
+        # 뜌비에게 귀(Sink)를 장착!
+        # 여기서 callback은 나중에 제미니와 연결할 함수입니다.
+        sink = BasicSink(callback=your_gemini_function) 
+        vc.listen(sink)
+        
+        await interaction.response.send_message("🎙️ 뜌비가 귀를 쫑긋 세웠어요! 말씀하시면 제미니가 대답해줄 거예요.")
+    else:
+        await interaction.response.send_message("⚠️ 슈비님, 먼저 음성 채널에 들어와주세요!")
+
 
 affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
 bot.tree.add_command(affinity_group)
