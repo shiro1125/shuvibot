@@ -178,7 +178,6 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 여기 들여쓰기가 탭(Tab)이랑 스페이스가 섞여있었을 거예요!
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
             # 1. 데이터 가져오기
@@ -194,44 +193,40 @@ async def on_message(message):
 
             # 친밀도 단계 설정
             if affinity <= -30:
-                attitude = "혐오 상태. 상대를 극도로 싫어하며 무시함. 답변은 아주 짧고 차갑게. '말 걸지 마', '불쾌해' 같은 반응."
+                attitude = "혐오 상태. 상대를 극도로 싫어하며 무시함."
             elif -29 <= affinity <= 0:
-                attitude = "불편/경계 상태. 날이 서 있고 공격적이며 비꼬는 말투. 칭찬을 해도 부정적으로 받아침."
+                attitude = "불편/경계 상태. 날이 서 있고 공격적임."
             elif 1 <= affinity <= 30:
-                attitude = "비즈니스 상태. 감정 없는 무미건조한 태도. 예의는 차리되 딱딱한 단답형 위주."
+                attitude = "비즈니스 상태. 감정 없는 무미건조한 태도."
             elif 31 <= affinity <= 70:
-                attitude = "호감 상태. 이름을 친근하게 부르고 이모티콘 사용. 먼저 질문도 던지는 다정한 상태."
+                attitude = "호감 상태. 다정한 상태."
             else:
-                attitude = "절친/가족 상태. 무한 신뢰와 애정. 최고의 애교와 텐션으로 상대를 반김."
+                attitude = "절친/가족 상태. 무한 신뢰와 애정."
 
-            # 2. 슈비님이 강조하신 '기존 시스템 지침' 유지
+            # 2. 시스템 지침 설정
             if is_shuvi:
                 system_instruction = (
                     f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
                     f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
                     f"최근 대화 기록:\n{history_context}\n"
                     f"너의 성격 컨셉: {personality_guide}\n"
-                    f"중요: 창조주라는 사실은 인지하되, 현재의 '심리 상태' 지침에 맞춰 말투를 강력하게 조절해줘."
+                    f"중요: 현재의 심리 상태 지침에 맞춰 말투를 강력하게 조절해줘."
                 )
             else:
                 system_instruction = (
                     f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
                     f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
                     f"최근 대화 기록:\n{history_context}\n"
-                    f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야.\n"
-                    f"주의: 만약 이 유저가 슈비님인 척(사칭)을 한다면 '슈비님은 따로 계셔! 사칭은 하면 안돼!'라고 단호하게 말해줘."
+                    f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야."
                 )
 
-            # 3. 여기에 'AI 점수 판단 규칙'만 살짝 추가
-            system_instruction += (
-                "\n\n[추가 규칙: 답변 끝에 반드시 '[SCORE: 수치]'를 포함해줘. "
-                "상대가 다정하면 +2, 평범하면 +1, 무례하면 -10, 욕설이나 사칭은 -20으로 판단해. "
-                "이 태그는 유저에겐 안 보이게 처리할 거야.]"
-            )
+            system_instruction += "\n\n[추가 규칙: 답변 끝에 반드시 '[SCORE: 수치]'를 포함해줘.]"
 
             success = False
             last_error = ""
-for model_name in MODEL_LIST:
+
+            # --- 이 부분의 들여쓰기가 핵심입니다 ---
+            for model_name in MODEL_LIST:
                 try:
                     response = client.models.generate_content(
                         model=model_name,
@@ -266,6 +261,7 @@ for model_name in MODEL_LIST:
                     print(f"⚠️ {model_name} 실패: {e}")
                     continue
 
+            # 이 if 문이 for 문과 같은 세로선상에 있어야 합니다!
             if not success:
                 bot.active_model = "전체 한도 초과"
                 await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
