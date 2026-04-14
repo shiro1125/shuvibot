@@ -1,7 +1,9 @@
 # Python 베이스 이미지
 FROM python:3.11
 
-RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && \
+    apt-get install -y ffmpeg libopus-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # 작업 디렉토리 설정
 WORKDIR /app
