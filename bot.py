@@ -298,14 +298,10 @@ def health_check():
 
 @bot.event
 async def on_ready():
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ {len(synced)}개의 슬래시 명령어 동기화 완료!")
-    except Exception as e:
-        print(f"❌ 명령어 동기화 실패: {e}")
-
+    # 1. 로그인 확인 로그부터 즉시 출력
     print(f'✅ 봇 로그인됨: {bot.user}')
 
+    # 2. 루프 시작 로그 (가벼운 작업들)
     if not control_voice_channel.is_running():
         control_voice_channel.start()
         print("🎙️ [시스템] 자동 입장 루프 시작!")
@@ -318,6 +314,14 @@ async def on_ready():
         rank_check_loop.start()
         print("👑 [시스템] 랭킹 체크 루프 시작!")
 
+    # 3. 무거운 동기화 작업은 맨 마지막에
+    try:
+        # sync()는 시간이 걸리므로 로그를 미리 찍어두면 안심이 됩니다.
+        print("⏳ 슬래시 명령어 동기화 중...")
+        synced = await bot.tree.sync()
+        print(f"✅ {len(synced)}개의 슬래시 명령어 동기화 완료!")
+    except Exception as e:
+        print(f"❌ 명령어 동기화 실패: {e}")
 
 @bot.event
 async def on_message(message):
