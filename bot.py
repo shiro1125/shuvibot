@@ -351,7 +351,38 @@ async def on_message(message):
 
 affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
 bot.tree.add_command(affinity_group)
+# --- [친밀도 설정 (엄마 전용 - 점수 고정)] ---
+@affinity_group.command(name="설정", description="유저의 친밀도를 특정 수치로 고정합니다. (엄마 전용)")
+@app_commands.describe(유저="설정할 유저", 수치="고정할 점수 (예: 100, -50)")
+async def 설정(interaction: discord.Interaction, 유저: discord.Member, 수치: int):
+    # 엄마(슈비)인지 확인
+    if interaction.user.id != SHUVI_USER_ID:
+        await interaction.response.send_message("뜌비의 마음을 강제로 정하는 건 엄마만 할 수 있어! 😤", ephemeral=True)
+        return
 
+    try:
+        # upsert를 사용해서 해당 수치로 바로 덮어쓰기
+        # chat_count는 기존 값을 유지하기 위해 먼저 불러옴
+        res = supabase.table("user_stats").select("chat_count").eq("user_id", 유저.id).execute()
+        if res and res.data and len(res.data) > 0:
+    		current_chat_count = res.data[0].get("chat_count", 0)
+		else:
+    		current_chat_count = 0
+
+        supabase.table("user_stats").upsert({
+            "user_id": 유저.id,
+            "user_name": 유저.display_name,
+            "affinity": 수치,
+            "chat_count": current_chat_count
+        }).execute()
+        
+        await interaction.response.send_message(
+            f"⚙️ **{유저.display_name}**님의 친밀도를 **{수치}점**으로 설정 완료했어!✨"
+        )
+    except Exception as e:
+        print(f"❌ 친밀도 설정 에러: {e}")
+        await interaction.response.send_message("설정 중에 에러가 났어...😭", ephemeral=True)
+		
 # --- [친밀도 확인] ---
 @affinity_group.command(name="확인", description="유저의 친밀도를 확인합니다.")
 @app_commands.describe(유저="친밀도를 확인할 유저를 선택하세요 (비우면 본인 확인)")
@@ -366,7 +397,7 @@ async def 확인(interaction: discord.Interaction, 유저: discord.Member = None
     else: status = "조심해야 할 사람 💀"
 
     await interaction.response.send_message(
-        f"📊 **{target.display_name}**님과 뜌비의 친밀도는 **{affinity}점**이야! (현재 상태: {status})"
+        f"📊 **{target.display_name}**님과 뜌비의 친밀도는 **{affinity}점**이야! (현재 상태: {status}"
     )
 
 # 2. 그룹 안에 랭킹 명령어를 넣습니다.
