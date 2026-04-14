@@ -294,15 +294,16 @@ async def on_message(message):
                     "5. '사랑해'를 들었는데 점수를 깎는 실수를 하지 마."
                 )
 
-                # 5. 모델 순회하며 답변 생성
+# 5. 모델 순회하며 답변 생성
                 success = False
-                available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
+                available_models = [m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)]
 
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
                         
-                        # 모델별 호출 (Gemma 등 시스템 인스트럭션 미지원 모델 대응)
+                        # 모델별 호출 설정
+                        # http_options는 지원되지 않는 경우가 많으므로 안전하게 제거하거나 config를 활용합니다.
                         if "gemma" in model_name.lower():
                             prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
                             response = client.models.generate_content(model=model_name, contents=prompt)
@@ -310,8 +311,10 @@ async def on_message(message):
                             response = client.models.generate_content(
                                 model=model_name,
                                 contents=full_content,
-                                config={'system_instruction': system_instruction},
-                                http_options={'timeout': 10.0}
+                                config={
+                                    'system_instruction': system_instruction,
+                                    # 필요한 경우 모델 설정값 추가 (timeout은 라이브러리 버전에 따라 위치가 다를 수 있음)
+                                }
                             )
                         
                         if response and response.text:
@@ -324,8 +327,10 @@ async def on_message(message):
                                     parts = full_text.split("[SCORE:")
                                     clean_res = parts[0].strip()
                                     score_val = parts[1].split("]")[0].strip()
+                                    # "+" 기호 제거 후 정수 변환
                                     score_change = int(score_val.replace("+", ""))
-                                except:
+                                except Exception as parse_err:
+                                    print(f"⚠️ 점수 파싱 에러: {parse_err}")
                                     clean_res = full_text
                             else:
                                 clean_res = full_text
@@ -339,13 +344,23 @@ async def on_message(message):
                                 update_user_affinity(user_id, user_name, score_change)
                             
                             success = True
-                            break 
+                            break # 답변 성공 시 루프 종료
 
                     except Exception as e:
                         err_str = str(e).upper()
                         print(f"⚠️ {model_name} 실패: {err_str}")
-                        if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
-                            if 'lock_model' in globals(): lock_model(model_name)
+                        
+                        # 🛑 할당량 초과 및 관련 에러 발생 시 모델 잠금(제외)
+                        if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT"]):
+                            print(f"🚫 {model_name} 한도 초과로 인해 리스트에서 제외합니다.")
+                            if 'lock_model' in globals():
+                                lock_model(model_name)
+                            else:
+                                # lock_model 함수가 없을 경우 직접 상태 변경
+                                if model_name in MODEL_STATUS:
+                                    MODEL_STATUS[model_name]["is_available"] = False
+                        
+                        # 에러가 발생했으므로 다음 모델로 자동 진행 (continue)
                         continue
 
                 if not success:
