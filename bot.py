@@ -251,7 +251,7 @@ async def on_message(message):
                 # 1. 데이터 가져오기
                 history_context = get_memory_from_db(user_name) if 'get_memory_from_db' in globals() else ""
                 affinity = get_user_affinity(user_id, user_name) if 'get_user_affinity' in globals() else 0
-                is_shuvi = (user_id == SHUVY_USER_ID) # SHUVY_USER_ID로 오타 확인
+                is_shuvi = (user_id == SHUVI_USER_ID) # SHUVI_USER_ID로 오타 확인
                 
                 # 성격 가이드 가져오기
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격"))
