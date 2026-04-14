@@ -17,6 +17,7 @@ class BasicSink(voice_recv.AudioSink):
         self.last_speaking_time = 0
         self.is_processing = False
         self.current_user = None
+        self.buffer_lock = asyncio.Lock()
 
         # 설정값
         self.SILENCE_THRESHOLD = 1.5  # 1.5초간 조용하면 말이 끝난 것으로 간주
@@ -39,6 +40,7 @@ class BasicSink(voice_recv.AudioSink):
             if not pcm:
                 return
 
+            # write는 sync 함수라 직접 await 못 하므로 빠르게 버퍼 추가만 처리
             self.audio_buffer.extend(pcm)
             self.last_speaking_time = time.time()
             self.current_user = user
@@ -66,12 +68,13 @@ class BasicSink(voice_recv.AudioSink):
                     current_time - self.last_speaking_time > self.SILENCE_THRESHOLD
                     and len(self.audio_buffer) > self.MIN_BUFFER_SIZE
                 ):
-                    audio_to_process = bytes(self.audio_buffer)
-                    user = self.current_user
+                    async with self.buffer_lock:
+                        audio_to_process = bytes(self.audio_buffer)
+                        user = self.current_user
 
-                    # 다음 발화를 위해 먼저 초기화
-                    self.audio_buffer = bytearray()
-                    self.current_user = None
+                        # 다음 발화를 위해 먼저 초기화
+                        self.audio_buffer = bytearray()
+                        self.current_user = None
 
                     try:
                         text = await transcribe_audio(audio_to_process)
@@ -91,8 +94,9 @@ class BasicSink(voice_recv.AudioSink):
 
                 # 너무 오래 데이터가 안 들어오면 버퍼 비우고 종료
                 if current_time - self.last_speaking_time > 10:
-                    self.audio_buffer = bytearray()
-                    self.current_user = None
+                    async with self.buffer_lock:
+                        self.audio_buffer = bytearray()
+                        self.current_user = None
                     break
 
         except Exception as e:
