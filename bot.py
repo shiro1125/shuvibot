@@ -573,8 +573,8 @@ async def your_gemini_function(user, text):
         # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
         # 예: await play_tts_voice(reply_text)
 
-    except Exception as e:
-        print(f"❌ 제미니 응답 실패: {e}")
+        except Exception as e:
+            print(f"❌ 제미니 응답 실패: {e}")
 
 
 # -----------------------------
