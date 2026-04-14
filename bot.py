@@ -511,13 +511,18 @@ async def 모델확인(interaction: discord.Interaction):
     status_msg += "━━━━━━━━━━━━━━━━━━\n"
     
     for i, model in enumerate(MODEL_LIST, 1):
-        info = MODEL_STATUS[model]
+        info = MODEL_STATUS.get(model, {"is_available": True})
+        
+        # 1순위: 사용 가능 여부 체크 (❌ 표시)
         if not info["is_available"]:
             state = "❌ **한도 초과**"
+        # 2순위: 현재 선택된 모델인지 체크 (🔥 표시)
         elif model == bot.active_model:
             state = "🔥 **작동 중**"
+        # 3순위: 대기 중인 모델 (순위 표시)
         else:
             state = f"{i}순위"
+            
         status_msg += f"{state}: `{model}`\n"
             
     status_msg += f"━━━━━━━━━━━━━━━━━━\n🎭 현재 성격: **{bot.current_personality}**"
