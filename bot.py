@@ -207,12 +207,13 @@ async def on_message(message):
         try:
             bot.is_processing = True # 방패 가동
             async with message.channel.typing():
-                # 1. 데이터 가져오기
-                history_context = get_memory_from_db(user_name)
                 user_id = message.author.id
                 user_name = message.author.display_name
                 
-                # 최신 친밀도 조회
+                # 2. 이제 user_name을 아니까 기억 가져오기
+                history_context = get_memory_from_db(user_name)
+                
+                # 3. 최신 친밀도 조회
                 affinity = get_user_affinity(user_id, user_name)
                 
                 is_shuvi = (user_id == SHUVI_USER_ID)
@@ -342,29 +343,14 @@ async def 확인(interaction: discord.Interaction, 유저: discord.Member = None
         f"📊 **{target.display_name}**님과 뜌비의 친밀도는 **{affinity}점**이야! (현재 상태: {status})"
     )
 
-# --- [친밀도 설정] (엄마 전용) ---
-@affinity_group.command(name="설정", description="친밀도를 강제로 설정합니다 (슈비 엄마 전용)")
-@app_commands.describe(유저="점수를 바꿀 유저", 수치="설정할 점수")
-async def 설정(interaction: discord.Interaction, 유저: discord.Member, 수치: int):
-    if interaction.user.id != SHUVI_USER_ID:
-        await interaction.response.send_message("슈비 엄마만 할 수 있어! 🤫", ephemeral=True)
-        return
-    
-    supabase.table("user_stats").upsert({
-        "user_id": 유저.id, 
-        "user_name": 유저.display_name, 
-        "affinity": 수치
-    }).execute()
-    await interaction.response.send_message(f"✅ **{유저.display_name}**님의 점수를 **{수치}점**으로 바꿨어, 엄마!")
-
-# --- [친밀도 랭킹] (TOP 30) ---
-@bot.tree.command(name="랭킹", description="뜌비의 절친 TOP 30 랭킹을 보여줍니다.")
+# 2. 그룹 안에 랭킹 명령어를 넣습니다.
+@affinity_group.command(name="랭킹", description="뜌비의 절친 TOP 30 랭킹을 보여줍니다.")
 async def 랭킹(interaction: discord.Interaction):
-    # 1. 디스코드에게 생각 중이라고 신호를 보냅니다 (3초 제한 해제)
+    # 디스코드에게 생각 중이라고 신호를 보냅니다 (3초 제한 해제)
     await interaction.response.defer()
 
     try:
-        # [수정] select에 chat_count를 추가해서 데이터 조회
+        # DB에서 점수(affinity)와 대화 횟수(chat_count)를 함께 가져옵니다.
         res = supabase.table("user_stats").select("user_name, affinity, chat_count").order("affinity", desc=True).limit(30).execute()
         
         if not res.data:
@@ -380,14 +366,13 @@ async def 랭킹(interaction: discord.Interaction):
             elif i == 3: medal = "🥉"
             else: medal = f"**{i}위**"
             
-            # 데이터 가져오기 (없을 경우를 대비해 기본값 설정)
             affinity_val = r.get('affinity', 0)
             chat_val = r.get('chat_count', 0)
             
-            # [수정] 점수 뒤에 대화 횟수를 추가합니다.
+            # 닉네임 - 점수 - 대화 횟수 순으로 표시
             msg += f"{medal} {r['user_name']} ― `{affinity_val}점` (💬 {chat_val}회)\n"
             
-        # 2. 결과가 준비되면 followup으로 답변을 보냅니다.
+        # 결과 전송
         await interaction.followup.send(msg)
 
     except Exception as e:
