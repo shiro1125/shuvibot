@@ -147,6 +147,7 @@ class MyBot(commands.Bot):
         self.is_processing = False
         self.current_personality = "기본"
         self.active_model = "대기 중"
+        self.voice_reset_lock = asyncio.Lock()
 
     async def setup_hook(self):
         try:
@@ -170,133 +171,6 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 app = Flask(__name__)
-
-# -----------------------------
-# 음성 연결 / 복구 함수
-# -----------------------------
-
-
-async def connect_and_listen(guild: discord.Guild):
-    try:
-        channel = guild.get_channel(WORK_CHANNEL_ID)
-        if not channel:
-            print("❌ 작업방 채널을 찾을 수 없습니다.", flush=True)
-            return None
-
-        vc = guild.voice_client
-
-        # 이미 일반 VoiceClient로 붙어 있으면 강제로 끊고 다시 붙음
-        if vc and vc.is_connected() and not isinstance(vc, voice_recv.VoiceRecvClient):
-            try:
-                await vc.disconnect(force=True)
-                print("🔄 일반 VoiceClient 감지 → VoiceRecvClient로 재연결 준비", flush=True)
-            except Exception as e:
-                print(f"⚠️ 기존 일반 VoiceClient 종료 실패: {e}", flush=True)
-            vc = None
-            await asyncio.sleep(1)
-
-        if vc and vc.is_connected():
-            if vc.channel and vc.channel.id != WORK_CHANNEL_ID:
-                await vc.move_to(channel)
-                print(f"🔄 {channel.name}으로 이동 완료", flush=True)
-            print("✅ 이미 음성 채널에 연결되어 있습니다.", flush=True)
-        else:
-            print("🔄 음성 채널 연결 시도 중...", flush=True)
-            vc = await channel.connect(cls=voice_recv.VoiceRecvClient, reconnect=False, timeout=20)
-            print("✅ 음성 채널 연결 완료", flush=True)
-
-        try:
-            if hasattr(vc, "is_listening") and vc.is_listening():
-                vc.stop_listening()
-                print("🛑 기존 음성 수신 중지", flush=True)
-        except Exception as e:
-            print(f"⚠️ 기존 수신 중지 실패: {e}", flush=True)
-
-        try:
-            sink = BasicSink(bot, your_gemini_function)
-            vc.listen(sink)
-            print("🎙️ 새 음성 수신 시작", flush=True)
-        except Exception as e:
-            print(f"❌ listen 시작 실패: {e}", flush=True)
-
-        return vc
-
-    except Exception as e:
-        print(f"❌ connect_and_listen 실패: {e}", flush=True)
-        return None
-
-
-async def hard_reset_voice(guild: discord.Guild):
-    print("🔥 음성 시스템 완전 리셋 시작", flush=True)
-
-    try:
-        vc = guild.voice_client
-
-        if vc:
-            try:
-                if hasattr(vc, "is_listening") and vc.is_listening():
-                    vc.stop_listening()
-                    print("🛑 listening 중지 완료", flush=True)
-            except Exception as e:
-                print(f"⚠️ stop_listening 실패: {e}", flush=True)
-
-            try:
-                await vc.disconnect(force=True)
-                print("🔌 기존 음성 연결 강제 종료 완료", flush=True)
-            except Exception as e:
-                print(f"⚠️ disconnect 실패: {e}", flush=True)
-
-        await asyncio.sleep(2)
-
-        await connect_and_listen(guild)
-        print("✅ 음성 시스템 완전 리셋 완료", flush=True)
-
-    except Exception as e:
-        print(f"❌ hard_reset_voice 실패: {e}", flush=True)
-
-
-async def voice_watchdog():
-    await bot.wait_until_ready()
-
-    while not bot.is_closed():
-        try:
-            guild = bot.get_guild(GUILD_ID_1)
-            if not guild:
-                await asyncio.sleep(10)
-                continue
-
-            if not bot.auto_join_enabled:
-                await asyncio.sleep(10)
-                continue
-
-            vc = guild.voice_client
-
-            if vc is None or not vc.is_connected():
-                print("⚠️ 음성 연결 끊김 감지 → 완전 리셋", flush=True)
-                await hard_reset_voice(guild)
-                await asyncio.sleep(10)
-                continue
-
-            if not isinstance(vc, voice_recv.VoiceRecvClient):
-                print("⚠️ VoiceRecvClient 아님 → 완전 리셋", flush=True)
-                await hard_reset_voice(guild)
-                await asyncio.sleep(10)
-                continue
-
-            try:
-                if hasattr(vc, "is_listening") and not vc.is_listening():
-                    print("⚠️ 음성 수신 죽음 감지 → 완전 리셋", flush=True)
-                    await hard_reset_voice(guild)
-                    await asyncio.sleep(10)
-                    continue
-            except Exception as e:
-                print(f"⚠️ is_listening 확인 실패: {e}", flush=True)
-
-            await asyncio.sleep(10)
-
-        except Exception as e:
-            print(f"❌ voice_watchdog 에러: {e}", flush=True)
-            await asyncio.sleep(10)
 
 # -----------------------------
 # DB 관련 함수
@@ -443,6 +317,241 @@ def save_to_memory(user_name, user_msg, bot_res):
 @app.route("/")
 def health_check():
     return "OK", 200
+
+# -----------------------------
+# AI 대화 함수
+# -----------------------------
+
+
+async def your_gemini_function(user, text):
+    """뜌비가 음성을 들었을 때 성격만 반영해서 답변하는 로직"""
+    if bot.is_processing:
+        return
+
+    if not text or not text.strip():
+        return
+
+    success = False
+    reply_text = ""
+
+    try:
+        bot.is_processing = True
+        user_name = user.display_name
+        is_shuvi = user.id == SHUVI_USER_ID
+
+        personality_guide = PERSONALITY_PROMPTS.get(
+            bot.current_personality,
+            PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격"),
+        )
+
+        if is_shuvi:
+            identity_prompt = "너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 너의 창조주 슈비 엄마야."
+        else:
+            identity_prompt = f"너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 '{user_name}'이야."
+
+        system_instruction = (
+            f"{identity_prompt}\n"
+            "현재 상황: 음성으로 실시간 대화 중이야.\n"
+            f"성격 컨셉: {personality_guide}\n\n"
+            "[음성 대화 규칙]\n"
+            "1. 문장은 최대한 짧고 간결하게 할 것 (한두 문장 권장).\n"
+            "2. 친밀도 점수([SCORE])는 절대 출력하지 마.\n"
+            "3. 성격 컨셉에 맞춰서 자연스럽게 리액션해줘."
+        )
+
+        available_models = [
+            m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)
+        ]
+        loop = asyncio.get_running_loop()
+
+        for model_name in available_models:
+            try:
+                bot.active_model = model_name
+
+                if "gemma" in model_name.lower():
+                    prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {text}"
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                        ),
+                    )
+                else:
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: client.models.generate_content(
+                            model=model_name,
+                            contents=text,
+                            config={"system_instruction": system_instruction},
+                        ),
+                    )
+
+                if response and hasattr(response, "text") and response.text:
+                    reply_text = response.text.strip()
+                    success = True
+                    break
+
+            except Exception as e:
+                err_str = str(e).upper()
+                print(f"⚠️ {model_name} 음성 응답 시도 중 실패: {e}", flush=True)
+
+                if any(
+                    x in err_str
+                    for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT", "PERMISSION_DENIED"]
+                ):
+                    print(f"🚫 {model_name} 한도 초과 감지! ❌ 상태로 변경합니다.", flush=True)
+                    lock_model(model_name)
+
+                continue
+
+        if success:
+            print(f"🤖 [뜌비 음성답변]: {reply_text}", flush=True)
+
+            channel = bot.get_channel(WORK_CHANNEL_ID)
+            if channel:
+                await channel.send(
+                    f"🎙️ **{user_name}**: {text}\n"
+                    f"🤖 **뜌비({bot.current_personality})**: {reply_text}"
+                )
+        else:
+            print("⚠️ 모든 모델이 실패해서 음성 답변을 생성하지 못했습니다.", flush=True)
+
+    except Exception as top_e:
+        print(f"❌ 음성 처리 시스템 심각 에러: {top_e}", flush=True)
+
+    finally:
+        bot.is_processing = False
+        bot.active_model = "대기 중"
+
+# -----------------------------
+# 음성 연결 / 복구 함수
+# -----------------------------
+
+
+async def connect_and_listen(guild: discord.Guild):
+    try:
+        channel = guild.get_channel(WORK_CHANNEL_ID)
+        if not channel:
+            print("❌ 작업방 채널을 찾을 수 없습니다.", flush=True)
+            return None
+
+        vc = guild.voice_client
+
+        # 이미 일반 VoiceClient면 끊고 VoiceRecvClient로 다시 붙기
+        if vc and vc.is_connected() and not isinstance(vc, voice_recv.VoiceRecvClient):
+            try:
+                await vc.disconnect(force=True)
+                print("🔄 일반 VoiceClient 감지 → VoiceRecvClient로 재연결 준비", flush=True)
+            except Exception as e:
+                print(f"⚠️ 기존 일반 VoiceClient 종료 실패: {e}", flush=True)
+            vc = None
+            await asyncio.sleep(1)
+
+        vc = guild.voice_client
+
+        if vc and vc.is_connected():
+            if vc.channel and vc.channel.id != WORK_CHANNEL_ID:
+                await vc.move_to(channel)
+                print(f"🔄 {channel.name}으로 이동 완료", flush=True)
+
+            print("✅ 이미 음성 채널에 연결되어 있습니다.", flush=True)
+
+        else:
+            print("🔄 음성 채널 연결 시도 중...", flush=True)
+            vc = await channel.connect(cls=voice_recv.VoiceRecvClient, reconnect=False, timeout=20)
+            print("✅ 음성 채널 연결 완료", flush=True)
+
+        try:
+            if hasattr(vc, "is_listening") and vc.is_listening():
+                vc.stop_listening()
+                print("🛑 기존 음성 수신 중지", flush=True)
+        except Exception as e:
+            print(f"⚠️ 기존 수신 중지 실패: {e}", flush=True)
+
+        sink = BasicSink(bot, your_gemini_function)
+        vc.listen(sink)
+        print("🎙️ 새 음성 수신 시작", flush=True)
+
+        return vc
+
+    except Exception as e:
+        print(f"❌ connect_and_listen 실패: {e}", flush=True)
+        return None
+
+
+async def hard_reset_voice(guild: discord.Guild):
+    async with bot.voice_reset_lock:
+        print("🔥 음성 시스템 완전 리셋 시작", flush=True)
+
+        try:
+            vc = guild.voice_client
+
+            if vc:
+                try:
+                    if hasattr(vc, "is_listening") and vc.is_listening():
+                        vc.stop_listening()
+                        print("🛑 listening 중지 완료", flush=True)
+                except Exception as e:
+                    print(f"⚠️ stop_listening 실패: {e}", flush=True)
+
+                try:
+                    await vc.disconnect(force=True)
+                    print("🔌 기존 음성 연결 강제 종료 완료", flush=True)
+                except Exception as e:
+                    print(f"⚠️ disconnect 실패: {e}", flush=True)
+
+            await asyncio.sleep(2)
+
+            await connect_and_listen(guild)
+            print("✅ 음성 시스템 완전 리셋 완료", flush=True)
+
+        except Exception as e:
+            print(f"❌ hard_reset_voice 실패: {e}", flush=True)
+
+
+async def voice_watchdog():
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            guild = bot.get_guild(GUILD_ID_1)
+            if not guild:
+                await asyncio.sleep(10)
+                continue
+
+            if not bot.auto_join_enabled:
+                await asyncio.sleep(10)
+                continue
+
+            vc = guild.voice_client
+
+            if vc is None or not vc.is_connected():
+                print("⚠️ 음성 연결 끊김 감지 → 완전 리셋", flush=True)
+                await hard_reset_voice(guild)
+                await asyncio.sleep(10)
+                continue
+
+            if not isinstance(vc, voice_recv.VoiceRecvClient):
+                print("⚠️ VoiceRecvClient 아님 → 완전 리셋", flush=True)
+                await hard_reset_voice(guild)
+                await asyncio.sleep(10)
+                continue
+
+            try:
+                if hasattr(vc, "is_listening") and not vc.is_listening():
+                    print("⚠️ 음성 수신 죽음 감지 → 완전 리셋", flush=True)
+                    await hard_reset_voice(guild)
+                    await asyncio.sleep(10)
+                    continue
+            except Exception as e:
+                print(f"⚠️ is_listening 확인 실패: {e}", flush=True)
+
+            await asyncio.sleep(10)
+
+        except Exception as e:
+            print(f"❌ voice_watchdog 에러: {e}", flush=True)
+            await asyncio.sleep(10)
 
 # -----------------------------
 # Bot 이벤트
@@ -633,102 +742,6 @@ async def on_message(message):
             return
 
     await bot.process_commands(message)
-
-
-async def your_gemini_function(user, text):
-    """뜌비가 음성을 들었을 때 성격만 반영해서 답변하는 로직"""
-    if bot.is_processing:
-        return
-
-    if not text or not text.strip():
-        return
-
-    success = False
-    reply_text = ""
-
-    try:
-        bot.is_processing = True
-        user_name = user.display_name
-        is_shuvi = user.id == SHUVI_USER_ID
-
-        personality_guide = PERSONALITY_PROMPTS.get(
-            bot.current_personality,
-            PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격"),
-        )
-
-        if is_shuvi:
-            identity_prompt = "너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 너의 창조주 슈비 엄마야."
-        else:
-            identity_prompt = f"너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 '{user_name}'이야."
-
-        system_instruction = (
-            f"{identity_prompt}\n"
-            "현재 상황: 음성으로 실시간 대화 중이야.\n"
-            f"성격 컨셉: {personality_guide}\n\n"
-            "[음성 대화 규칙]\n"
-            "1. 문장은 최대한 짧고 간결하게 할 것 (한두 문장 권장).\n"
-            "2. 친밀도 점수([SCORE])는 절대 출력하지 마.\n"
-            "3. 성격 컨셉에 맞춰서 자연스럽게 리액션해줘."
-        )
-
-        available_models = [
-            m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)
-        ]
-        loop = asyncio.get_running_loop()
-
-        for model_name in available_models:
-            try:
-                bot.active_model = model_name
-
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: client.models.generate_content(
-                        model=model_name,
-                        contents=text,
-                        config={"system_instruction": system_instruction},
-                    ),
-                )
-
-                if response and hasattr(response, "text") and response.text:
-                    reply_text = response.text.strip()
-                    success = True
-                    break
-
-            except Exception as e:
-                err_str = str(e).upper()
-                print(f"⚠️ {model_name} 음성 응답 시도 중 실패: {e}", flush=True)
-
-                if any(
-                    x in err_str
-                    for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT", "PERMISSION_DENIED"]
-                ):
-                    print(f"🚫 {model_name} 한도 초과 감지! ❌ 상태로 변경합니다.", flush=True)
-                    lock_model(model_name)
-
-                continue
-
-        if success:
-            print(f"🤖 [뜌비 음성답변]: {reply_text}", flush=True)
-
-            channel = bot.get_channel(WORK_CHANNEL_ID)
-            if channel:
-                await channel.send(
-                    f"🎙️ **{user_name}**: {text}\n"
-                    f"🤖 **뜌비({bot.current_personality})**: {reply_text}"
-                )
-
-            # 필요하면 여기에 TTS 연결
-            # await play_tts_voice(reply_text)
-
-        else:
-            print("⚠️ 모든 모델이 실패해서 음성 답변을 생성하지 못했습니다.", flush=True)
-
-    except Exception as top_e:
-        print(f"❌ 음성 처리 시스템 심각 에러: {top_e}", flush=True)
-
-    finally:
-        bot.is_processing = False
-        bot.active_model = "대기 중"
 
 # -----------------------------
 # 슬래시 명령어
@@ -958,14 +971,9 @@ async def control_voice_channel():
         print("⚠️ [자동입장] 서버를 찾을 수 없습니다.", flush=True)
         return
 
-    vc = guild.voice_client
-
-    # 이미 연결되어 있으면 watchdog이 listening 상태를 관리함
-    if vc and vc.is_connected():
-        return
-
-    print("🔄 [자동입장] 연결 안 되어 있음 → connect_and_listen 실행", flush=True)
-    await connect_and_listen(guild)
+    # 여기서는 연결/복구 절대 하지 않음
+    # watchdog이 음성 연결/복구를 전담함
+    return
 
 
 @tasks.loop(minutes=1)
