@@ -342,16 +342,16 @@ async def on_message(message):
             full_content = message.content
 
         # 3. 친밀도에 따른 태도(attitude) 결정
-        if affinity <= -31:
-            attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
-        elif -30 <= affinity <= -1:
-        	attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
-        elif 0 <= affinity <= 30:
-            attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
-         elif 31 <= affinity <= 70:
-            attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
-        else:
-            attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
+			if affinity <= -31:
+            	attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+        	elif -30 <= affinity <= -1:
+        		attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+        	elif 0 <= affinity <= 30:
+         	   attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
+       		elif 31 <= affinity <= 70:
+            	attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
+       		else:
+            	attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
                 # 4. 최종 시스템 지시문 완성
                 if is_shuvy:  # 변수명이 is_shuvy인지 is_shuvi인지 확인 필요 (기본값 is_shuvy 가정)
