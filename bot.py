@@ -116,6 +116,12 @@ class MyBot(commands.Bot):
         self.current_personality = "기본"  # 뜌비의 성격 상태
 
     async def setup_hook(self):
+        try:
+            await self.load_extension('tts') # tts.py 파일을 불러옵니다.
+            print("✅ TTS 파일 로드 완료!")
+        except Exception as e:
+            print(f"❌ TTS 파일 로드 실패: {e}")
+
         await self.tree.sync()
         print("✅ 슬래시 명령어 동기화 완료!")
 
