@@ -5,6 +5,7 @@ from datetime import datetime, time
 import pytz
 import asyncio
 import json
+import tts_module
 import os
 from flask import Flask
 from threading import Thread
