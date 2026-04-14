@@ -528,9 +528,9 @@ async def 모델확인(interaction: discord.Interaction):
             
         status_msg += f"{state}: `{model}`\n"
             
-    status_msg += "━━━━━━━━━━━━━━━━━━\n"
-    status_msg += f"🎭 현재 성격: **{bot.current_personality}**"
-	status_msg += f"🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
+		status_msg += f"━━━━━━━━━━━━━━━━━━\n"
+        status_msg += f"🎭 현재 성격: **{bot.current_personality}**\n"
+        status_msg += f"🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
     
     await interaction.response.send_message(status_msg)
 	
