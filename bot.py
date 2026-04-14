@@ -42,6 +42,19 @@ MODEL_LIST = [
     "models/gemma-3-27b-it"
 ]
 
+MODEL_STATUS = {model: {"is_available": True} for model in MODEL_LIST}
+
+def reset_model_status():
+    """모든 모델의 상태를 초기화합니다."""
+    for model in MODEL_STATUS:
+        MODEL_STATUS[model]["is_available"] = True
+    print("🔄 [시스템] 모든 모델의 사용 제한이 초기화되었습니다.")
+
+def lock_model(model_name):
+    """한도가 초과된 모델을 잠급니다."""
+    if model_name in MODEL_STATUS:
+        MODEL_STATUS[model_name]["is_available"] = False
+        print(f"🚫 [경고] {model_name} 한도 초과. 오후 4시까지 건너뜁니다.")
 
 # 성격별 시스템 프롬프트 정의
 PERSONALITY_PROMPTS = {
@@ -272,7 +285,10 @@ async def on_message(message):
                 success = False
                 last_error = ""
 
-                for model_name in MODEL_LIST:
+                # [수정] 가동 가능한 모델만 필터링해서 시도합니다.
+                available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
+
+                for model_name in available_models:
                     try:
                         bot.active_model = model_name
                         
@@ -293,7 +309,7 @@ async def on_message(message):
                         
                         if response and response.text:
                             full_text = response.text
-                            score_change = 1
+                            score_change = 0 # 기본 변동값 초기화
                             
                             # [슈비님 로직] SCORE 파싱
                             if "[SCORE:" in full_text:
@@ -314,9 +330,15 @@ async def on_message(message):
                             
                             success = True
                             break # 답변 성공 시 루프 종료
+
                     except Exception as e:
                         last_error = str(e).upper()
-                        print(f"⚠️ {model_name} 실패: {e}")
+                        
+                        # [핵심 추가] 429(Quota Exceeded) 에러 발생 시 해당 모델을 잠급니다.
+                        if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
+                            lock_model(model_name)
+                        
+                        print(f"⚠️ {model_name} 실패, 다음 시도... (사유: {last_error})")
                         continue
 
                 # 4. 모든 모델 실패 시 처리
@@ -431,22 +453,39 @@ async def 모델확인(interaction: discord.Interaction):
         await interaction.response.send_message("뜌비의 내부 상태는 슈비 엄마만 볼 수 있어! 🤫", ephemeral=True)
         return
 
-    status_msg = "🤖 **뜌비봇 모델 가동 현황**\n"
-    status_msg += "---\n"
+    status_msg = "🤖 **뜌비봇 모델 실시간 가동 현황**\n"
+    status_msg += "*(매일 오후 4시 자동 리셋)*\n"
+    status_msg += "━━━━━━━━━━━━━━━━━━\n"
+    
     for i, model in enumerate(MODEL_LIST, 1):
-        prefix = "🔥 **작동 중**" if model == bot.active_model else f"{i}순위"
-        status_msg += f"{prefix}: `{model}`\n"
+        info = MODEL_STATUS[model]
+        if not info["is_available"]:
+            state = "❌ **한도 초과**"
+        elif model == bot.active_model:
+            state = "🔥 **작동 중**"
+        else:
+            state = f"{i}순위"
+        status_msg += f"{state}: `{model}`\n"
             
-    status_msg += f"\n🎭 현재 성격: **{bot.current_personality}**"
-    status_msg += f"\n🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**\n---"
+    status_msg += f"━━━━━━━━━━━━━━━━━━\n🎭 현재 성격: **{bot.current_personality}**"
+    status_msg += f"\n🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
+    
     await interaction.response.send_message(status_msg)
+	
 # --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
     now_korea = datetime.now(korea)
+    
+    # [추가된 부분] 오후 4시 0분에 모델 상태 리셋
+    if now_korea.hour == 16 and now_korea.minute == 0:
+        reset_model_status()
+
+    # --- 기존 음성 채널 관리 로직 ---
     guild = bot.get_guild(GUILD_ID_1)
     if not guild: return
+    
     if bot.auto_join_enabled:
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
         if work_channel:
