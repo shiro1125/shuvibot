@@ -25,7 +25,7 @@ class Blackjack(commands.Cog):
     async def blackjack(self, interaction: discord.Interaction):
         user_name = interaction.user.display_name
         
-        # 덱 초기화 (호감도 영향 없음)
+        # 덱 초기화 (친밀도 시스템과 완전히 독립됨)
         deck = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'] * 4
         random.shuffle(deck)
         
@@ -40,7 +40,8 @@ class Blackjack(commands.Cog):
         }
         
         embed = discord.Embed(title="🃏 공정한 블랙잭", color=0x5865F2)
-        embed.set_footer(text="이 게임은 뜌비의 호감도 시스템에 영향을 받지 않는 공정 모드입니다.")
+        # 하단 문구 수정: 호감도 -> 친밀도
+        embed.set_footer(text="⚠️ 이 게임은 뜌비의 친밀도 시스템에 영향을 받지 않는 공정 모드입니다.")
         embed.add_field(name=f"👤 {user_name}님의 카드", value=f"{', '.join(user_hand)}\n(합계: **{self.calculate_score(user_hand)}**)", inline=True)
         embed.add_field(name="🤖 딜러(뜌비) 카드", value=f"{bot_hand[0]}, ❓", inline=True)
         
@@ -77,7 +78,7 @@ class BlackjackView(discord.ui.View):
         user_score = self.cog.calculate_score(data['user'])
         bot_score = self.cog.calculate_score(data['bot'])
         
-        # 딜러 규칙: 17점 미만 무조건 히트 (호감도와 상관없는 고정 확률)
+        # 딜러 규칙: 친밀도와 무관하게 17점 미만이면 무조건 카드를 뽑습니다.
         while bot_score < 17:
             data['bot'].append(data['deck'].pop())
             bot_score = self.cog.calculate_score(data['bot'])
