@@ -122,6 +122,9 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 app = Flask(__name__)
+
+SHUVI_USER_ID = 440517859140173835
+
 def get_user_affinity(user_id, user_name):
     try:
         # 1. 먼저 유저 데이터가 있는지 확인
@@ -195,7 +198,7 @@ async def on_ready():
         send_notifications.start()
 
 # --- Gemini 대화 로직 ---
-SHUVI_USER_ID = 440517859140173835
+
 def get_memory_from_db(user_name):
     try:
         # DB에서 해당 유저의 최신 대화 15개를 가져옵니다.
