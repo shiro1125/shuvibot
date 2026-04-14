@@ -7,6 +7,7 @@ import asyncio
 import json
 import tts_module
 import os
+
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
@@ -377,18 +378,25 @@ async def on_message(message):
                     try:
                         bot.active_model = model_name
                         
-                        # 모델별 호출 설정
-                        if "gemma" in model_name.lower():
-                            # Gemma 모델은 시스템 인스트럭션을 프롬프트에 포함 (라이브러리 호환성)
-                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
-                            response = client.models.generate_content(model=model_name, contents=prompt)
-                        else:
-                            # Gemini 모델 호출
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=full_content,
-                                config={'system_instruction': system_instruction}
-                            )
+                     # 봇의 메인 루프를 가져옵니다.
+loop = asyncio.get_event_loop()
+
+if "gemma" in model_name.lower():
+    prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
+    # 비동기로 실행하여 봇이 멈추는 것을 방지합니다.
+    response = await loop.run_in_executor(
+        None, lambda: client.models.generate_content(model=model_name, contents=prompt)
+    )
+else:
+    # Gemini 모델 호출을 비동기 스레드에서 실행합니다.
+    response = await loop.run_in_executor(
+        None, 
+        lambda: client.models.generate_content(
+            model=model_name,
+            contents=full_content,
+            config={'system_instruction': system_instruction}
+        )
+    )
                         
                         if response and response.text:
                             full_text = response.text
