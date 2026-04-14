@@ -1,53 +1,49 @@
 import discord
 from discord.ext import voice_recv
-import whisper
+import speech_recognition as sr # 가벼운 라이브러리로 변경
+import io
 import os
 import asyncio
 
-# 1. AI 모델 준비 (Koyeb 사양에 맞춰 가장 가벼운 'tiny' 모델 사용)
-# 처음 실행될 때만 모델을 다운로드합니다.
-model = whisper.load_model("tiny")
+# 음성 인식기 초기화
+r = sr.Recognizer()
 
 class SpeechToText:
     def __init__(self, bot):
         self.bot = bot
 
-    async def process_voice(self, user, data):
+    async def transcribe_audio(self, audio_data):
         """
-        이 부분은 실제 음성 데이터를 처리하는 로직입니다.
-        데이터를 임시 파일로 저장한 뒤 Whisper로 읽습니다.
+        수집된 음성 데이터를 텍스트로 변환합니다.
         """
-        # 임시 파일 경로
-        filename = f"temp_voice_{user.id}.wav"
+        # 1. 받은 음성 데이터를 AI가 읽을 수 있는 형태로 변환
+        audio = sr.AudioData(audio_data, 48000, 2)
         
         try:
-            # 2. Whisper로 음성 -> 텍스트 변환
-            # fp16=False는 CPU만 있는 서버 환경에서 에러를 방지합니다.
-            result = model.transcribe(filename, fp16=False, language='ko')
-            text = result['text'].strip()
-            
-            if text:
-                print(f"🎙️ [인식 성공] {user.display_name}: {text}")
-                return text
-        except Exception as e:
-            print(f"❌ [STT 에러] {e}")
-        finally:
-            # 작업이 끝나면 임시 파일 삭제
-            if os.path.exists(filename):
-                os.remove(filename)
-        return None
+            # 2. 구글 음성 인식 엔진 사용 (용량 차지 없음!)
+            # language='ko-KR' 설정으로 한국어를 인식합니다.
+            text = r.recognize_google(audio, language='ko-KR')
+            return text
+        except sr.UnknownValueError:
+            # 목소리가 너무 작거나 이해할 수 없을 때
+            return None
+        except sr.RequestError as e:
+            print(f"❌ [STT 에러] 구글 서비스 연결 실패: {e}")
+            return None
 
-# 3. 봇에 추가할 '귀' 클래스 (Sink)
 class BasicSink(voice_recv.AudioSink):
-    def __init__(self, callback):
-        self.callback = callback
+    def __init__(self, bot, text_callback):
+        self.bot = bot
+        self.text_callback = text_callback
+        self.stt = SpeechToText(bot)
 
     def want_opus(self):
-        return False # PCM(가공하기 쉬운 데이터) 형태로 받음
+        return False # 가공하기 쉬운 PCM 데이터로 받기
 
     def write(self, user, data):
-        # 여기서 사용자의 목소리가 들어오지만, 
-        # 실시간 처리는 복잡하므로 특정 조건(말 끝남 등)을 체크하는 로직이 추가로 필요합니다.
+        # 실시간으로 데이터가 들어오는 곳입니다.
+        # 여기서는 간단한 구조만 보여드리며, 
+        # 실제로는 일정 시간(무음)을 체크해 문장을 완성하는 로직이 필요합니다.
         pass
 
     def cleanup(self):
