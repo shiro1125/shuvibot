@@ -498,16 +498,33 @@ async def on_message(message):
 
 @bot.tree.command(name="듣기시작", description="뜌비가 목소리를 듣고 답변합니다.")
 async def start_listening(interaction: discord.Interaction):
+    # 1. 이미 연결된 음성 클라이언트가 있는지 확인
+    voice_client = interaction.guild.voice_client
+
     if interaction.user.voice:
-        # voice_recv 기능을 사용해서 채널 접속
-        vc = await interaction.user.voice.channel.connect(cls=voice_recv.VoiceRecvClient)
-        
-        # 뜌비에게 귀(Sink)를 장착!
-        # 여기서 callback은 나중에 제미니와 연결할 함수입니다.
-        sink = BasicSink(callback=your_gemini_function) 
-        vc.listen(sink)
-        
-        await interaction.response.send_message("🎙️ 뜌비가 귀를 쫑긋 세웠어요! 말씀하시면 제미니가 대답해줄 거예요.")
+        try:
+            # 2. 이미 접속 중이라면?
+            if voice_client and voice_client.is_connected():
+                # 이미 voice_recv 클라이언트인지 확인하고, 아니면 다시 연결해야 할 수도 있음
+                if not isinstance(voice_client, voice_recv.VoiceRecvClient):
+                    await voice_client.disconnect()
+                    vc = await interaction.user.voice.channel.connect(cls=voice_recv.VoiceRecvClient)
+                else:
+                    vc = voice_client
+            else:
+                # 접속 안 되어 있으면 새로 접속
+                vc = await interaction.user.voice.channel.connect(cls=voice_recv.VoiceRecvClient)
+            
+            # 3. 귀(Sink) 장착 (이미 듣고 있는 중이 아닐 때만)
+            if not vc.is_listening():
+                sink = BasicSink(bot, your_gemini_function) # bot과 콜백 함수 전달
+                vc.listen(sink)
+                await interaction.response.send_message("🎙️ 뜌비가 이제 귀를 열었어요!")
+            else:
+                await interaction.response.send_message("🎙️ 뜌비는 이미 열심히 듣고 있는 중이에요!")
+
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 접속 중 에러 발생: {e}")
     else:
         await interaction.response.send_message("⚠️ 슈비님, 먼저 음성 채널에 들어와주세요!")
 
