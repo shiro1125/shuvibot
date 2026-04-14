@@ -12,7 +12,7 @@ from threading import Thread
 from dotenv import load_dotenv
 from google import genai
 from supabase import create_client, Client
-from stt import SpeechToText, BasicSink
+from stt import BasicSink
 
 # 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
