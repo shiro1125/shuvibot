@@ -179,7 +179,6 @@ class BlackjackView(discord.ui.View):
         embed = discord.Embed(title="🏁 게임 결과", description=f"**{result_text}**", color=color)
         embed.add_field(name=f"👤 {data['name']} (최종)", value=f"카드: {', '.join(data['user'])}\n합계: **{u_score}**", inline=True)
         embed.add_field(name="🤖 뜌비 (최종)", value=f"카드: {', '.join(data['bot'])}\n합계: **{b_score}**", inline=True)
-        embed.set_footer(text="결과가 Supabase DB에 실시간 반영되었습니다.")
         
         await interaction.response.edit_message(embed=embed, view=None)
 
