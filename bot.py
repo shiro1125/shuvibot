@@ -79,10 +79,13 @@ class MyBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         intents.voice_states = True
+
         super().__init__(command_prefix='!', intents=intents)
+        
         self.auto_join_enabled = True
+        self.is_processing = False  # 뜌비가 생각 중인지 확인 (최적화 핵심!)
         self.active_model = "대기 중"
-        self.current_personality = "기본"  # 기본 성격 설정
+        self.current_personality = "기본"  # 뜌비의 성격 상태
 
     async def setup_hook(self):
         await self.tree.sync()
@@ -177,94 +180,125 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # 뜌비가 언급되었거나 이름이 포함된 경우
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
-        async with message.channel.typing():
-            # 1. 데이터 가져오기
-            history_context = get_memory_from_db()
-            user_id = message.author.id
-            user_name = message.author.display_name
-            
-            # 최신 친밀도 조회
-            affinity = get_user_affinity(user_id, user_name)
-            
-            is_shuvi = (user_id == SHUVI_USER_ID)
-            personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
+        
+        if bot.is_processing:
+            return
 
-            # 친밀도 단계 설정
-            if affinity <= -30:
-                attitude = "혐오 상태. 상대를 극도로 싫어하며 무시함."
-            elif -29 <= affinity <= 0:
-                attitude = "불편/경계 상태. 날이 서 있고 공격적임."
-            elif 1 <= affinity <= 30:
-                attitude = "비즈니스 상태. 감정 없는 무미건조한 태도."
-            elif 31 <= affinity <= 70:
-                attitude = "호감 상태. 다정한 상태."
-            else:
-                attitude = "절친/가족 상태. 무한 신뢰와 애정."
+        try:
+            bot.is_processing = True # 방패 가동
+            async with message.channel.typing():
+                # 1. 데이터 가져오기
+                history_context = get_memory_from_db()
+                user_id = message.author.id
+                user_name = message.author.display_name
+                
+                # 최신 친밀도 조회
+                affinity = get_user_affinity(user_id, user_name)
+                
+                is_shuvi = (user_id == SHUVI_USER_ID)
+                personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-            # 2. 시스템 지침 설정
-            if is_shuvi:
-                system_instruction = (
-                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
-                    f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
-                    f"최근 대화 기록:\n{history_context}\n"
-                    f"너의 성격 컨셉: {personality_guide}\n"
-                    f"중요: 현재의 심리 상태 지침에 맞춰 말투를 강력하게 조절해줘."
-                )
-            else:
-                system_instruction = (
-                    f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
-                    f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
-                    f"최근 대화 기록:\n{history_context}\n"
-                    f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야."
-                )
+              # [슈비님 로직 수정] 0점 기준 친밀도 단계 설정
+if affinity <= -31:
+    attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+elif -30 <= affinity <= -1:
+    attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+elif 0 <= affinity <= 30:
+    attitude = "비즈니스 상태. 감정 없는 무미건조하고 딱딱한 태도."
+elif 31 <= affinity <= 70:
+    attitude = "호감 상태. 다정하고 친근하게 대함."
+else:
+    attitude = "절친/가족 상태. 무한한 신뢰와 깊은 애정을 표현함."
 
-            system_instruction += "\n\n[추가 규칙: 답변 끝에 반드시 '[SCORE: 수치]'를 포함해줘.]"
-
-            success = False
-            last_error = ""
-
-            # --- 이 부분의 들여쓰기가 핵심입니다 ---
-            for model_name in MODEL_LIST:
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=message.content,
-                        config={'system_instruction': system_instruction}
+                # 2. 시스템 지침 설정
+                if is_shuvi:
+                    system_instruction = (
+                        f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
+                        f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
+                        f"최근 대화 기록:\n{history_context}\n"
+                        f"너의 성격 컨셉: {personality_guide}\n"
+                        f"중요: 현재의 심리 상태 지침에 맞춰 말투를 강력하게 조절해줘."
                     )
-                    
-                    if response and response.text:
-                        full_text = response.text
-                        score_change = 1
-                        
-                        if "[SCORE:" in full_text:
-                            try:
-                                parts = full_text.split("[SCORE:")
-                                clean_res = parts[0].strip()
-                                score_val = parts[1].split("]")[0].strip()
-                                score_change = int(score_val)
-                            except:
-                                clean_res = full_text
-                        else:
-                            clean_res = full_text
+                else:
+                    system_instruction = (
+                        f"너는 슈비님의 AI 딸내미 '뜌비'야. 지금 상대는 '{user_name}'이야.\n"
+                        f"현재 이 유저와의 심리적 친밀도 단계: {attitude}\n"
+                        f"최근 대화 기록:\n{history_context}\n"
+                        f"너의 현재 성격 컨셉은 '{bot.current_personality}'이야."
+                    )
 
-                        await message.reply(clean_res)
-                        save_to_memory(user_name, message.content, clean_res)
-                        update_user_affinity(user_id, user_name, score_change)
-                        
+                system_instruction += (
+    "\n\n[친밀도 규칙]"
+    "\n1. 모든 답변 끝에 반드시 '[SCORE: 수치]'를 포함한다."
+    "\n2. 이번 대화가 즐거웠다면 +1, 평범했다면 0, 불쾌했다면 -1을 부여한다."
+    "\n3. 한 번에 ±2를 초과하는 수치는 절대 사용하지 않는다."
+    "\n4. SCORE 수치는 현재 점수가 아니라 '변동값'임을 명심한다."
+)
+
+                # 3. 모델 순회하며 답변 생성
+                success = False
+                last_error = ""
+
+                for model_name in MODEL_LIST:
+                    try:
                         bot.active_model = model_name
-                        success = True
-                        break
-                except Exception as e:
-                    last_error = str(e).upper()
-                    print(f"⚠️ {model_name} 실패: {e}")
-                    continue
+                        
+                        # [최적화 2] Gemma 모델 호환성 처리
+                        if "gemma" in model_name:
+                            full_content = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {message.content}"
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=full_content
+                            )
+                        else:
+                            # Gemini 모델 기본 처리
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=message.content,
+                                config={'system_instruction': system_instruction}
+                            )
+                        
+                        if response and response.text:
+                            full_text = response.text
+                            score_change = 1
+                            
+                            # [슈비님 로직] SCORE 파싱
+                            if "[SCORE:" in full_text:
+                                try:
+                                    parts = full_text.split("[SCORE:")
+                                    clean_res = parts[0].strip()
+                                    score_val = parts[1].split("]")[0].strip()
+                                    score_change = int(score_val)
+                                except:
+                                    clean_res = full_text
+                            else:
+                                clean_res = full_text
 
-            # 이 if 문이 for 문과 같은 세로선상에 있어야 합니다!
-            if not success:
-                bot.active_model = "전체 한도 초과"
-                await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
-    
+                            # 답변 출력 및 데이터 저장
+                            await message.reply(clean_res)
+                            save_to_memory(user_name, message.content, clean_res)
+                            update_user_affinity(user_id, user_name, score_change)
+                            
+                            success = True
+                            break # 답변 성공 시 루프 종료
+                    except Exception as e:
+                        last_error = str(e).upper()
+                        print(f"⚠️ {model_name} 실패: {e}")
+                        continue
+
+                # 4. 모든 모델 실패 시 처리
+                if not success:
+                    bot.active_model = "전체 한도 초과"
+                    await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
+
+        finally:
+            # [최적화 3] 성공하든 실패하든 방패 해제
+            bot.is_processing = False
+            if bot.active_model != "전체 한도 초과":
+                bot.active_model = "대기 중"
+
     await bot.process_commands(message)
 
 
