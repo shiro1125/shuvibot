@@ -35,7 +35,7 @@ class TTS(commands.Cog):
 
            # 재생 및 파일 삭제 (이 부분을 수정합니다)
             # executable="/usr/bin/ffmpeg" 를 추가해서 경로를 직접 알려주는 거예요!
-            source = discord.FFmpegPCMAudio(filename, executable="/usr/bin/ffmpeg")
+            source = discord.FFmpegPCMAudio(filename, executable="ffmpeg")
             
             vc.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
             await interaction.followup.send(f"📢 '{텍스트}'라고 말했어요!")
