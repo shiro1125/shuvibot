@@ -620,24 +620,38 @@ async def on_ready():
 async def control_voice_channel():
     now_korea = datetime.now(korea)
     
-    # [추가된 부분] 오후 4시 0분에 모델 상태 리셋
+    # 오후 4시 모델 리셋 (기존 로직)
     if now_korea.hour == 16 and now_korea.minute == 0:
         reset_model_status()
 
-    # --- 기존 음성 채널 관리 로직 ---
-    guild = bot.get_guild(GUILD_ID_1)
-    if not guild: return
-    
     if bot.auto_join_enabled:
+        guild = bot.get_guild(GUILD_ID_1)
+        if not guild: 
+            print("⚠️ [자동입장] 서버를 찾을 수 없습니다.")
+            return
+            
         work_channel = guild.get_channel(WORK_CHANNEL_ID)
-        if work_channel:
-            voice = guild.voice_client
-            if voice is None or not voice.is_connected():
-                try:
-                    if voice: await voice.disconnect(force=True)
-                    await asyncio.sleep(1)
-                    await work_channel.connect(reconnect=True, timeout=15)
-                except Exception: pass
+        if not work_channel:
+            print("⚠️ [자동입장] 작업 채널 ID가 올바르지 않습니다.")
+            return
+
+        # 뜌비의 현재 음성 연결 상태 확인
+        vc = guild.voice_client
+
+        # 연결이 없거나, 엉뚱한 채널에 가 있다면?
+        if vc is None or not vc.is_connected():
+            try:
+                print(f"🔄 [자동입장] {work_channel.name} 접속 시도 중...")
+                await work_channel.connect(reconnect=True, timeout=20)
+            except Exception as e:
+                print(f"❌ [자동입장] 접속 실패: {e}")
+        elif vc.channel.id != WORK_CHANNEL_ID:
+            # 다른 방에 있다면 원래 방으로 데려오기
+            try:
+                await vc.move_to(work_channel)
+                print(f"🔄 [자동입장] {work_channel.name}으로 이동 완료.")
+            except Exception as e:
+                print(f"❌ [자동입장] 이동 실패: {e}")
 
 @tasks.loop(minutes=1)
 async def send_notifications():
