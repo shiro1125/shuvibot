@@ -251,6 +251,117 @@ async def on_message(message):
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
+                # 2. 성격에 따른 컨텐츠 구성
+                if bot.current_personality == "기본":
+                    full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
+                else:
+                    full_content = message.content
+
+                # 3. 친밀도 단계 설정
+                if affinity <= -31:
+                    attitude = "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+                elif -30 <= affinity <= -1:
+                    attitude = "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+                elif 0 <= affinity <= 30:
+                    attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
+                elif 31 <= affinity <= 70:
+                    attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
+                else:
+                    attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
+
+                # 4. 최종 시스템 지시문 완성
+                base_instruction = (
+                    f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 {'창조주 슈비님' if is_shuvi else f'유저 {user_name}'}이야.\n"
+                    f"현재 상대와의 심리적 친밀도 단계: {attitude}\n"
+                    f"너의 현재 성격 컨셉: {personality_guide}\n"
+                    f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
+                )
+
+                score_rule = (
+                    "\n\n[친밀도 산정 절대 원칙]\n1. 유저의 태도를 우선하여 점수를 매긴다.\n2. 긍정 표현 시 무조건 +10~20점.\n3. 욕설/비하 시에만 마이너스 점수.\n4. 답변 끝에 반드시 [SCORE: 수치] 포함."
+                )
+                
+                system_instruction = base_instruction + score_rule
+
+                # 5. 모델 순회하며 답변 생성
+                success = False
+                last_error_type = ""
+                available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
+
+                for model_name in available_models:
+                    try:
+                        bot.active_model = model_name
+                        
+                        # 모델 호출 (타임아웃 5초 추가로 쾌적함 유지)
+                        if "gemma" in model_name:
+                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
+                            response = client.models.generate_content(
+                                model=model_name, 
+                                contents=prompt,
+                                http_options={'timeout': 5.0}
+                            )
+                        else:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=full_content,
+                                config={'system_instruction': system_instruction},
+                                http_options={'timeout': 5.0}
+                            )
+                        
+                        if response and response.text:
+                            full_text = response.text
+                            score_change = 0
+                            
+                            # 점수 파싱 로직
+                            if "[SCORE:" in full_text:
+                                try:
+                                    parts = full_text.split("[SCORE:")
+                                    clean_res = parts[0].strip()
+                                    score_val = parts[1].split("]")[0].strip()
+                                    score_change = int(score_val)
+                                except:
+                                    clean_res = full_text
+                            else:
+                                clean_res = full_text
+
+                            # 전송 및 저장
+                            await message.reply(clean_res)
+                            save_to_memory(user_name, message.content, clean_res)
+                            update_user_affinity(user_id, user_name, score_change)
+                            
+                            success = True
+                            break 
+
+                    except Exception as e:
+                        err_str = str(e).upper()
+                        print(f"⚠️ {model_name} 실패: {err_str}")
+                        
+                        if any(x in err_str for x in ["503", "UNAVAILABLE"]):
+                            last_error_type = "503"
+                            break # 유일한 모델이 아프면 즉시 중단
+                        elif any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
+                            last_error_type = "429"
+                            lock_model(model_name)
+                            continue # 다음 모델 시도
+                        else:
+                            continue
+
+                # 6. 모든 모델 실패 시 안내
+                if not success:
+                    if last_error_type == "503":
+                        await message.reply("지금 구글 서버가 너무 바빠서 뜌비가 잠시 대답을 못 한대... 😭 조금 이따가 다시 불러줘!")
+                    elif last_error_type == "429":
+                        await message.reply("오늘 뜌비가 너무 많이 떠들었나 봐! 기운이 다 빠져서 내일 다시 올게. 💤")
+                    else:
+                        await message.reply("미안! 지금은 기운이 없어... 나중에 다시 올게! 😭")
+
+        except Exception as top_e:
+            print(f"❌ 전체 로직 에러: {top_e}")
+        finally:
+            bot.is_processing = False
+            bot.active_model = "대기 중"
+
+			
                 # 2. 성격에 따른 메모리 필터링
                 if bot.current_personality == "기본":
                     full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
