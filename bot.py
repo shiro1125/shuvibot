@@ -492,26 +492,75 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-# 뜌비가 들은 내용을 제미니에게 전달하고 답변을 받는 통로입니다.
 async def your_gemini_function(user, text):
-    print(f"🎙️ [음성 인식] {user.display_name}: {text}")
-    
-    # 1. 제미니에게 답변 요청 (슈비님이 설정하신 기본 모델 사용)
-    # 현재 로그를 보니 'models/gemini-3-flash-preview'를 주로 쓰시는 것 같네요!
-    model_name = "models/gemini-3-flash-preview" 
-    
+    """뜌비가 음성을 들었을 때 성격만 반영해서 답변하는 로직"""
+    if bot.is_processing:
+        return
+
+    success = False  # 성공 여부 체크용
+    reply_text = ""  # 답변 저장용
+
     try:
-        # 이 부분은 기존에 사용하시던 제미니 호출 코드를 그대로 응용합니다.
-        response = client.models.generate_content(
-            model=model_name,
-            contents=text,
-            config={
-                'system_instruction': (
-                    "너는 슈비(Shuvi)님에 의해 만들어진 '뜌비'야. "
-                    "지금 음성으로 대화 중이야. 아주 짧고 친절하게 대답해줘."
-                )
-            }
+        bot.is_processing = True
+        user_name = user.display_name
+        is_shuvi = (user.id == SHUVI_USER_ID)
+
+        # 1. 현재 설정된 성격 가이드 가져오기
+        personality_guide = PERSONALITY_PROMPTS.get(
+            bot.current_personality, 
+            PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격")
         )
+
+        # 2. 시스템 지시문 구성 (친밀도 제외, 성격 연기 집중)
+        identity_prompt = f"너는 슈비님의 AI 딸내미 '뜌비'야. 상대는 '{user_name}'이야." if not is_shuvi else "상대는 너의 창조주 슈비 엄마야."
+        
+        system_instruction = (
+            f"{identity_prompt}\n"
+            f"현재 상황: 음성으로 실시간 대화 중이야.\n"
+            f"성격 컨셉: {personality_guide}\n\n"
+            " [음성 대화 규칙]\n"
+            "1. 문장은 최대한 짧고 간결하게 할 것 (한두 문장 권장).\n"
+            "2. 친밀도 점수([SCORE])는 절대 출력하지 마.\n"
+            "3. 성격 컨셉에 맞춰서 자연스럽게 리액션해줘."
+        )
+
+        # 3. 모델 순회하며 답변 생성
+        available_models = [m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)]
+        loop = asyncio.get_running_loop()
+
+        for model_name in available_models:
+            try:
+                bot.active_model = model_name
+                
+                response = await loop.run_in_executor(None, lambda: client.models.generate_content(
+                    model=model_name,
+                    contents=text,
+                    config={'system_instruction': system_instruction}
+                ))
+
+                if response and hasattr(response, "text") and response.text:
+                    reply_text = response.text.strip()
+                    success = True
+                    break
+            except Exception as e:
+                print(f"⚠️ {model_name} 음성 응답 시도 중 실패: {e}")
+                continue
+
+        # 4. 답변이 성공했을 때만 출력 및 로그 남기
+        if success:
+            print(f"🤖 [뜌비 음성답변]: {reply_text}")
+            channel = bot.get_channel(WORK_CHANNEL_ID)
+            if channel:
+                await channel.send(f"🎙️ **{user_name}**: {text}\n🤖 **뜌비({bot.current_personality})**: {reply_text}")
+            
+            # [여기에 TTS 재생 코드를 넣으시면 목소리가 나옵니다!]
+            # await play_tts_voice(reply_text)
+
+    except Exception as top_e:
+        print(f"❌ 음성 처리 시스템 에러: {top_e}")
+    finally:
+        bot.is_processing = False
+        bot.active_model = "대기 중"
         
         reply_text = response.text
         print(f"🤖 [뜌비 답변]: {reply_text}")
