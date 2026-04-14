@@ -248,10 +248,10 @@ async def on_message(message):
                 user_id = message.author.id
                 user_name = message.author.display_name
                 
-                # 1. 데이터 가져오기 (DB 함수들이 정의되어 있어야 함)
+                # 1. 데이터 가져오기
                 history_context = get_memory_from_db(user_name) if 'get_memory_from_db' in globals() else ""
                 affinity = get_user_affinity(user_id, user_name) if 'get_user_affinity' in globals() else 0
-                is_shuvi = (user_id == SHUVI_USER_ID) # SHUVI_USER_ID 정의 확인 필요
+                is_shuvi = (user_id == SHUVY_USER_ID) # SHUVY_USER_ID로 오타 확인
                 
                 # 성격 가이드 가져오기
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS.get("기본", "밝고 친절한 성격"))
@@ -292,9 +292,10 @@ async def on_message(message):
                     "4. 답변 끝에 반드시 [SCORE: 수치] 포함. (예: [SCORE: +15])\n"
                     "5. '사랑해'를 들었는데 점수를 깎는 실수를 하지 마."
                     "6. 최대 변동 수치는 +20점 까지야."
+                    "7. 유저가 뭔가 궁금해서 물어보면 검색해서 잘 답해줘."
                 )
 
-# 5. 모델 순회하며 답변 생성
+                # 5. 모델 순회하며 답변 생성
                 success = False
                 # 현재 사용 가능한 모델만 필터링
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS.get(m, {}).get("is_available", True)]
@@ -338,8 +339,11 @@ async def on_message(message):
                             # 응답 전송 및 데이터 저장
                             await message.reply(clean_res)
                             
-                            if 'save_to_memory' in globals():
+                            # --- 수정된 부분: 기본 성격일 때만 메모리에 저장 ---
+                            if bot.current_personality == "기본" and 'save_to_memory' in globals():
                                 save_to_memory(user_name, message.content, clean_res)
+                            
+                            # 친밀도 업데이트는 성격에 관계없이 수행 (원치 않으시면 위 if문 안으로 옮기시면 됩니다)
                             if 'update_user_affinity' in globals():
                                 update_user_affinity(user_id, user_name, score_change)
                             
@@ -348,24 +352,19 @@ async def on_message(message):
 
                     except Exception as e:
                         err_str = str(e).upper()
-                        # ⚠️ 로그 출력 (터미널에서 에러 내용을 확인하는 핵심 포인트)
                         print(f"‼️ {model_name} 실패 원인: {err_str}")
                         
-                        # 🛑 할당량 초과 및 관련 에러 발생 시 (429, RESOURCE_EXHAUSTED 등)
                         if any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA", "LIMIT", "RATE_LIMIT", "PERMISSION_DENIED"]):
                             print(f"🚫 {model_name} 한도 초과 감지! ❌ 상태로 변경합니다.")
                             
-                            # 1. 전역 상태 즉시 변경
                             if model_name in MODEL_STATUS:
                                 MODEL_STATUS[model_name]["is_available"] = False
                             
-                            # 2. lock_model 함수가 있다면 호출하여 추가 로직 실행
                             if 'lock_model' in globals():
                                 lock_model(model_name)
                                 
                             bot.active_model = "대기 중"
                         
-                        # 다음 순위 모델로 자동 진행
                         continue
 
                 if not success:
@@ -375,7 +374,6 @@ async def on_message(message):
             print(f"❌ [심각] 전체 로직 에러: {top_e}")
         finally:
             bot.is_processing = False
-            bot.active_model = "대기 중"
 
     # 일반 명령어 처리
     await bot.process_commands(message)
