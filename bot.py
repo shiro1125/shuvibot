@@ -147,6 +147,19 @@ def get_user_affinity(user_id, user_name):
 # 1위 역할 ID와 서버 ID (슈비님이 설정하신 값으로 바꾸세요)
 RANK_1_ROLE_ID = 1493551151323549767  # 실제 역할 ID
 
+def get_top_ranker_id():
+    """DB에서 친밀도가 가장 높은 유저 1명의 ID를 가져옵니다."""
+    try:
+        # user_stats 테이블에서 affinity 기준 내림차순으로 1위 유저 1명 추출
+        res = supabase.table("user_stats").select("user_id").order("affinity", desc=True).limit(1).execute()
+        
+        if res.data and len(res.data) > 0:
+            return res.data[0]['user_id']
+        return None
+    except Exception as e:
+        print(f"❌ 1위 조회 에러 (get_top_ranker_id): {e}")
+        return None
+
 async def update_rank_1_role():
     guild = bot.get_guild(GUILD_ID_1) # 봇이 있는 서버
     if not guild: return
