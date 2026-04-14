@@ -8,3 +8,5 @@ google-genai
 supabase
 gTTS
 edge-tts
+requests
+python-dotenv
