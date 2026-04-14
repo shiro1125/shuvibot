@@ -92,37 +92,36 @@ bot = MyBot()
 app = Flask(__name__)
 def get_user_affinity(user_id, user_name):
     try:
-        # DB에서 이 유저의 점수가 있는지 확인해요
-        res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
+        # 최신 생성 시간 순으로 1개만 가져옴
+        res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
+        
         if res.data:
             return res.data[0]['affinity']
         else:
-            # 기록이 없는 유저라면 새로 0점을 만들어줘요
-            supabase.table("user_stats").insert({
-                "user_id": user_id, 
-                "user_name": user_name, 
-                "affinity": 0
-            }).execute()
+            # 기록이 없으면 신규 생성 (0점)
+            supabase.table("user_stats").insert({"user_id": user_id, "user_name": user_name, "affinity": 0}).execute()
             return 0
     except Exception as e:
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
-
 def update_user_affinity(user_id, user_name, amount):
     try:
-        # 위에서 만든 get_user_affinity를 여기서 써서 최신 점수를 가져와요!
+        # 1. 먼저 현재 점수를 안전하게 가져옵니다.
         current = get_user_affinity(user_id, user_name)
         
+        # 2. upsert를 통해 기존 데이터에 덮어씌우거나 업데이트합니다.
+        # (DB 테이블 설정에서 user_id가 Primary Key여야 중복이 생기지 않습니다!)
         supabase.table("user_stats").upsert({
             "user_id": user_id, 
             "user_name": user_name, 
             "affinity": current + amount
         }).execute()
+        
         print(f"✅ {user_name}님 친밀도 변동: {current} -> {current + amount}")
     except Exception as e:
         print(f"❌ 친밀도 업데이트 에러: {e}")
-        return 0
+        return 0 # 여기에 탭(Tab)이 섞이지 않게 주의하세요!
 		
 @app.route('/')
 def health_check():
