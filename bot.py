@@ -324,21 +324,35 @@ async def on_message(message):
                             full_text = response.text
                             score_change = 0
                             
-                            # 점수 파싱 및 텍스트 정제
+                           # 점수 파싱 및 텍스트 정제
                             if "[SCORE:" in full_text:
                                 try:
                                     parts = full_text.split("[SCORE:")
                                     clean_res = parts[0].strip()
-                                    score_val = parts[1].split("]")[0].strip()
-                                    score_change = int(score_val.replace("+", ""))
+                                    score_val_str = parts[1].split("]")[0].strip()
+                                    
+                                    # 1. 일단 AI가 준 점수를 정수로 바꿈
+                                    raw_score = int(score_val_str.replace("+", ""))
+                                    
+                                    # 2. 🔥 여기서 최대 20, 최소 -20으로 강제 제한!
+                                    score_change = max(-20, min(20, raw_score))
+                                    
+                                    # (선택) 만약 뜌비가 20점 넘게 줬다면 로그에 남겨서 감시하기
+                                    if raw_score > 20:
+                                        print(f"⚠️ 뜌비가 점수를 너무 많이 줬어! ({raw_score}점 -> {score_change}점으로 조정)")
+
                                 except Exception as parse_err:
                                     print(f"⚠️ 점수 파싱 에러: {parse_err}")
                                     clean_res = full_text
                             else:
                                 clean_res = full_text
 
-                            # 응답 전송 및 데이터 저장
+                            # 응답 전송
                             await message.reply(clean_res)
+                            
+                            # 정해진 score_change(최대 20)로 업데이트 진행
+                            if 'update_user_affinity' in globals():
+                                update_user_affinity(user_id, user_name, score_change)
                             
                             # --- 수정된 부분: 기본 성격일 때만 메모리에 저장 ---
                             if bot.current_personality == "기본" and 'save_to_memory' in globals():
