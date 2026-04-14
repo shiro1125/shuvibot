@@ -384,19 +384,19 @@ async def on_message(message):
                 if "gemma" in model_name.lower():
                     prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
     # 비동기로 실행하여 봇이 멈추는 것을 방지합니다.
-                    response = await loop.run_in_executor(
-                    None, lambda: client.models.generate_content(model=model_name, contents=prompt)
-                    )
+                response = await loop.run_in_executor(
+                None, lambda: client.models.generate_content(model=model_name, contents=prompt)
+                )
                 else:
     # Gemini 모델 호출을 비동기 스레드에서 실행합니다.
-                response = await loop.run_in_executor(
-                None, 
-                lambda: client.models.generate_content(
-                model=model_name,
-                contents=full_content,
-                config={'system_instruction': system_instruction}
+                    response = await loop.run_in_executor(
+                    None, 
+                    lambda: client.models.generate_content(
+                    model=model_name,
+                    contents=full_content,
+                    config={'system_instruction': system_instruction}
+                )
             )
-        )
                         
                         if response and response.text:
                             full_text = response.text
