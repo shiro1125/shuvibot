@@ -503,33 +503,39 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
     await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
 
 # --- [모델 상태 확인] ---
-@bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
+@bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
+    # 1. 헤더 구성
     status_msg = "🤖 **뜌비봇 모델 실시간 가동 현황**\n"
     status_msg += "*(매일 오후 4시 자동 리셋)*\n"
-    status_msg += "━━━━━━━━━━━━━━━━━━\n"
-    
+    status_msg += "----------------------------\n"
+
+    # 2. 모델 리스트 출력 루프
     for i, model in enumerate(MODEL_LIST, 1):
-        info = MODEL_STATUS.get(model, {"is_available": True})
+        # MODEL_STATUS에서 가용 여부 확인 (없으면 True로 간주)
+        is_available = MODEL_STATUS.get(model, {}).get("is_available", True)
         
-        # 1. 한도 초과(❌)가 가장 우선
-        if not info["is_available"]:
-            state = "❌ **한도 초과**"
-        
-        # 2. 한도가 남았고, 현재 '활성화된 모델(active_model)'이면 무조건 불꽃!
-        elif model == getattr(bot, 'active_model', None):
-            state = "🔥 **작동 중**"
-            
-        # 3. 나머지는 순위 표시
+        if not is_available:
+            # 한도 초과된 경우
+            line = f"❌ **한도 초과**: `{model}`"
         else:
-            state = f"{i}순위"
-            
-        status_msg += f"{state}: `{model}`\n"
-            
-        status_msg += f"━━━━━━━━━━━━━━━━━━\n"
-        status_msg += f"🎭 현재 성격: **{bot.current_personality}**\n"
-        status_msg += f"🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
+            # 정상 가동 중인 경우 (1순위는 특별 표시)
+            prefix = "✅ **현재 1순위**" if i == 1 else f"{i}순위"
+            line = f"{prefix}: `{model}`"
+        
+        status_msg += line + "\n"
+
+    # 3. 하단 부가 정보 (성격, 자동 입장 등)
+    status_msg += "----------------------------\n"
     
+    # 현재 성격 표시 (기본값 설정)
+    current_p = getattr(bot, 'current_personality', '기본')
+    status_msg += f"🎭 **현재 성격: {current_p}**\n"
+    
+    # 자동 입장 상태 표시
+    auto_status = "켜짐" if getattr(bot, 'auto_join_enabled', False) else "꺼짐"
+    status_msg += f"🎙️ **자동 입장: {auto_status}**"
+
     await interaction.response.send_message(status_msg)
     
 # --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
