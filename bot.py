@@ -113,18 +113,28 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix='!', intents=intents)
         
         self.auto_join_enabled = True
-        self.is_processing = False  # 뜌비가 생각 중인지 확인 (최적화 핵심!)
+        self.is_processing = False  # 뜌비가 생각 중인지 확인
         self.current_personality = "기본"  # 뜌비의 성격 상태
 
     async def setup_hook(self):
+        # 1. TTS 파일 로드
         try:
-            await self.load_extension('tts') # tts.py 파일을 불러옵니다.
+            await self.load_extension('tts')
             print("✅ TTS 파일 로드 완료!")
         except Exception as e:
             print(f"❌ TTS 파일 로드 실패: {e}")
 
+        # 2. 블랙잭 파일 로드 (새로 추가됨!)
+        try:
+            await self.load_extension('blackjack')
+            print("✅ 블랙잭 파일 로드 완료!")
+        except Exception as e:
+            print(f"❌ 블랙잭 파일 로드 실패: {e}")
+
+        # 3. 명령어 동기화
         await self.tree.sync()
         print("✅ 슬래시 명령어 동기화 완료!")
+        
 
 bot = MyBot()
 app = Flask(__name__)
