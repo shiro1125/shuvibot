@@ -1,14 +1,17 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import edge_tts  # 1. 이거 추가
+import requests  # edge_tts 대신 requests를 사용합니다
 import os
 
 class TTS(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # 슈비님이 발급받은 정보 (보안을 위해 이곳에 직접 넣거나 .env를 쓰세요)
+        self.api_key = "sk_e5bbe4c60535ec2ca035244927e7e28397ea49e756fdabcf"
+        self.voice_id = "0tX0fDpY5yPAOO00erV7"
 
-    @app_commands.command(name="말해", description="뜌비가 음성 채널에서 말을 합니다.")
+    @app_commands.command(name="말해", description="슈비님이 만든 목소리로 뜌비가 말을 합니다.")
     async def speak(self, interaction: discord.Interaction, 텍스트: str):
         if not interaction.user.voice:
             await interaction.response.send_message("⚠️ 먼저 음성 채널에 들어가 주세요!", ephemeral=True)
@@ -19,11 +22,30 @@ class TTS(commands.Cog):
         filename = f"voice_{interaction.user.id}.mp3"
 
         try:
-            # 2. 이 부분이 gTTS 대신 edge-tts로 바뀌는 핵심이에요!
-            # ko-KR-SunHiNeural은 아주 맑은 여성 목소리입니다.
-            communicate = edge_tts.Communicate(텍스트, "ko-KR-SunHiNeural")
-            await communicate.save(filename)
+            # 1. ElevenLabs API 호출 부분 (교체됨)
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+            headers = {
+                "xi-api-key": self.api_key,
+                "Content-Type": "application/json"
+            }
+            data = {
+                "text": 텍스트,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": 0.45,
+                    "similarity_boost": 0.75
+                }
+            }
 
+            response = requests.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                with open(filename, 'wb') as f:
+                    f.write(response.content)
+            else:
+                raise Exception(f"API 오류 (상태 코드: {response.status_code})")
+
+            # 2. 음성 채널 접속 및 재생 (기존 로직 유지)
             vc = interaction.guild.voice_client
             if not vc:
                 vc = await channel.connect()
@@ -33,11 +55,11 @@ class TTS(commands.Cog):
             if vc.is_playing():
                 vc.stop()
 
-            # 3. 이전에 성공했던 ffmpeg 설정은 그대로 유지!
-            source = discord.FFmpegPCMAudio(filename, executable="ffmpeg")
+            # ffmpeg 설정은 그대로 유지하되, Koyeb 환경에 맞춰 executable 경로는 기본값 사용
+            source = discord.FFmpegPCMAudio(filename)
             
             vc.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
-            await interaction.followup.send(f"📢 '{텍스트}'라고 말했어요!")
+            await interaction.followup.send(f"🎤 **뜌비:** {텍스트}")
 
         except Exception as e:
             await interaction.followup.send(f"❌ 에러 발생: {e}")
