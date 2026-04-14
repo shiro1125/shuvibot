@@ -243,8 +243,39 @@ async def on_message(message):
                 # 3. 최신 친밀도 조회
                 affinity = get_user_affinity(user_id, user_name)
                 
+                # ... (기존 상단 로직 유지)
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
+
+                # --- [수정 구간: 성격에 따른 메모리 선택적 적용] ---
+                
+                # 성격이 '기본'일 때만 DB에서 가져온 과거 기억(history_context)을 포함합니다.
+                # 기본이 아닐 때는 말투 섞임 방지를 위해 과거 기억을 무시하고 현재 메시지만 보냅니다.
+                if bot.current_personality == "기본":
+                    # 과거 기억과 현재 메시지를 합쳐서 전달
+                    full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
+                else:
+                    # 말투 오염을 막기 위해 과거 기억은 배제하고 현재 메시지만 전달
+                    # 단, 유저의 이름이나 친밀도는 시스템 지시문에 포함되어 있으므로 대화는 가능합니다.
+                    full_content = message.content
+                
+
+                # 이후 client.models.generate_content 호출 시 contents에 full_content를 넣으세요.
+                success = False
+                for model_name in MODEL_LIST:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=full_content, # 필터링된 내용을 보냅니다.
+                            config={
+                                'system_instruction': (
+                                    f"{personality_guide}\n"
+                                    f"대화 상대: {user_name} (현재 친밀도: {affinity})\n"
+                                    f"지시: 현재 너의 성격 설정인 [{bot.current_personality}] 모드에만 충실해라. "
+                                    f"이전 대화의 말투가 현재 성격과 다르다면 철저히 무시하고 현재 예시문대로만 말할 것."
+                                )
+                            }
+                        )
 
 # [슈비님 로직 수정] 0점 기준 친밀도 단계 설정 (스페이스 정렬 완료)
                 if affinity <= -31:
@@ -283,6 +314,7 @@ async def on_message(message):
     "\n3. 유저가 욕설, 비하, 공격적인 언행을 할 때만 마이너스 점수를 부여한다."
     "\n4. 답변 끝에는 반드시 [SCORE: 수치] 형태로 이번 대화에 대한 변동값을 적는다. (예: [SCORE: +15])"
 	"\n5. 한 번에 ±20를 초과하는 수치는 절대 사용하지 않는다."
+	"\n6. 수치는 유저가 한 말이 좋고 나쁨의 정도를 판단하여 적절하게 산정한다."
     
     "\n\n[주의사항]"
     "\n- 유저가 너를 좋아해준다면, 너도 그 호의를 논리적으로 인정하고 점수로 반영해야 해. "
