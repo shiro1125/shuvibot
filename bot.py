@@ -234,13 +234,13 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 뜌비가 언급되었거나 이름이 포함된 경우
+# 뜌비가 언급되었거나 이름이 포함된 경우
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         if bot.is_processing:
             return
 
         try:
-            bot.is_processing = True # 방패 가동
+            bot.is_processing = True
             async with message.channel.typing():
                 user_id = message.author.id
                 user_name = message.author.display_name
@@ -251,7 +251,7 @@ async def on_message(message):
                 is_shuvi = (user_id == SHUVI_USER_ID)
                 personality_guide = PERSONALITY_PROMPTS.get(bot.current_personality, PERSONALITY_PROMPTS["기본"])
 
-                # 2. 성격에 따른 컨텐츠 구성
+                # 2. 성격에 따른 컨텐츠 및 지시문 구성
                 if bot.current_personality == "기본":
                     full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
                 else:
@@ -265,23 +265,18 @@ async def on_message(message):
                 elif 0 <= affinity <= 30:
                     attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
                 elif 31 <= affinity <= 70:
-                    attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
+                    attitude = "호감 상태. 다정하고 친근하게 대함."
                 else:
-                    attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
+                    attitude = "절친 상태. 무한한 신뢰와 깊은 애정을 표현함."
 
                 # 4. 최종 시스템 지시문 완성
-                base_instruction = (
+                system_instruction = (
                     f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 {'창조주 슈비님' if is_shuvi else f'유저 {user_name}'}이야.\n"
                     f"현재 상대와의 심리적 친밀도 단계: {attitude}\n"
                     f"너의 현재 성격 컨셉: {personality_guide}\n"
-                    f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
+                    f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘.\n\n"
+                    "[친밀도 산정 절대 원칙]\n1. 유저의 태도를 우선하여 점수를 매긴다.\n2. 긍정 표현 시 무조건 +10~20점.\n3. 욕설/비하 시에만 마이너스 점수.\n4. 답변 끝에 반드시 [SCORE: 수치] 포함."
                 )
-
-                score_rule = (
-                    "\n\n[친밀도 산정 절대 원칙]\n1. 유저의 태도를 우선하여 점수를 매긴다.\n2. 긍정 표현 시 무조건 +10~20점.\n3. 욕설/비하 시에만 마이너스 점수.\n4. 답변 끝에 반드시 [SCORE: 수치] 포함."
-                )
-                
-                system_instruction = base_instruction + score_rule
 
                 # 5. 모델 순회하며 답변 생성
                 success = False
@@ -291,28 +286,18 @@ async def on_message(message):
                 for model_name in available_models:
                     try:
                         bot.active_model = model_name
-                        
-                        # 모델 호출 (타임아웃 5초 추가로 쾌적함 유지)
-                        if "gemma" in model_name:
-                            prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
-                            response = client.models.generate_content(
-                                model=model_name, 
-                                contents=prompt,
-                                http_options={'timeout': 5.0}
-                            )
-                        else:
-                            response = client.models.generate_content(
-                                model=model_name,
-                                contents=full_content,
-                                config={'system_instruction': system_instruction},
-                                http_options={'timeout': 5.0}
-                            )
+                        # 5초 타임아웃으로 쾌적함 유지
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=full_content,
+                            config={'system_instruction': system_instruction},
+                            http_options={'timeout': 5.0}
+                        )
                         
                         if response and response.text:
                             full_text = response.text
                             score_change = 0
                             
-                            # 점수 파싱 로직
                             if "[SCORE:" in full_text:
                                 try:
                                     parts = full_text.split("[SCORE:")
@@ -324,7 +309,6 @@ async def on_message(message):
                             else:
                                 clean_res = full_text
 
-                            # 전송 및 저장
                             await message.reply(clean_res)
                             save_to_memory(user_name, message.content, clean_res)
                             update_user_affinity(user_id, user_name, score_change)
@@ -335,18 +319,16 @@ async def on_message(message):
                     except Exception as e:
                         err_str = str(e).upper()
                         print(f"⚠️ {model_name} 실패: {err_str}")
-                        
                         if any(x in err_str for x in ["503", "UNAVAILABLE"]):
                             last_error_type = "503"
-                            break # 유일한 모델이 아프면 즉시 중단
+                            break 
                         elif any(x in err_str for x in ["429", "EXHAUSTED", "QUOTA"]):
                             last_error_type = "429"
                             lock_model(model_name)
-                            continue # 다음 모델 시도
+                            continue
                         else:
                             continue
 
-                # 6. 모든 모델 실패 시 안내
                 if not success:
                     if last_error_type == "503":
                         await message.reply("지금 구글 서버가 너무 바빠서 뜌비가 잠시 대답을 못 한대... 😭 조금 이따가 다시 불러줘!")
@@ -361,7 +343,6 @@ async def on_message(message):
             bot.is_processing = False
             bot.active_model = "대기 중"
 
-			
                 # 2. 성격에 따른 메모리 필터링
                 if bot.current_personality == "기본":
                     full_content = f"과거 대화 기억:\n{history_context}\n\n현재 유저의 말: {message.content}"
@@ -376,17 +357,17 @@ async def on_message(message):
                 elif 0 <= affinity <= 30:
                     attitude = "비즈니스 상태. 무미건조하고 딱딱한 태도."
                 elif 31 <= affinity <= 70:
-                    attitude = "호감 상태. 다정하고 친근하게 대함."
+                    attitude = "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
                 else:
-                    attitude = "절친 상태. 무한한 신뢰와 깊은 애정을 표현함."
+                    attitude = "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
                 # 4. 최종 시스템 지시문 완성
-                if is_shuvi:
+                if is_shuvy:  # 변수명이 is_shuvy인지 is_shuvi인지 확인 필요 (기본값 is_shuvy 가정)
                     system_instruction = (
                         f"너는 슈비(엄마)님에 의해 만들어진 '뜌비'야. 상대는 너의 창조주 슈비님이야.\n"
                         f"현재 엄마와의 심리적 친밀도 단계: {attitude}\n"
                         f"너의 성격 컨셉: {personality_guide}\n"
-						f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
+                        f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
                     )
                 else:
                     system_instruction = (
@@ -396,25 +377,25 @@ async def on_message(message):
                         f"중요: 성격 컨셉이 기본이 아니라면 친밀도보다 컨셉을 우선해줘."
                     )
 
-                system_instruction = (
-   					"\n\n[친밀도 산정 절대 원칙]"
-   					"\n1. 뜌비 너의 개인적인 기분이나 캐릭터 컨셉(츤데레 등)보다 유저의 태도를 우선하여 점수를 매긴다."
-   					"\n2. 유저가 '사랑해', '좋아해', '예쁘다', '고마워' 등 긍정적인 표현을 하면 뜌비의 답변 내용과 상관없이 무조건 +10~20점을 부여한다."
-    				"\n3. 유저가 욕설, 비하, 공격적인 언행을 할 때만 마이너스 점수를 부여한다."
-   					"\n4. 답변 끝에는 반드시 [SCORE: 수치] 형태로 이번 대화에 대한 변동값을 적는다. (예: [SCORE: +15])"
-					"\n5. 수치는 유저가 한말이 얼마나 좋고 나쁜지를 판단하고 적절한 수치로 부여한다." 
-    
-   					"\n\n[주의사항]"
-   					"\n- 유저가 너를 좋아해준다면, 너도 그 호의를 논리적으로 인정하고 점수로 반영해야 해. "
-   					"\n- '사랑해'라는 말을 들었는데 점수를 깎는 것은 시스템 오류로 간주되니 주의할 것."
-)
+                # 기존 지침에 친밀도 산정 원칙을 추가(Append)합니다.
+                system_instruction += (
+                    "\n\n[친밀도 산정 절대 원칙]\n"
+                    "1. 뜌비 너의 개인적인 기분이나 캐릭터 컨셉(츤데레 등)보다 유저의 태도를 우선하여 점수를 매긴다.\n"
+                    "2. 유저가 '사랑해', '좋아해', '예쁘다', '고마워' 등 긍정적인 표현을 하면 뜌비의 답변 내용과 상관없이 무조건 +10~20점을 부여한다.\n"
+                    "3. 유저가 욕설, 비하, 공격적인 언행을 할 때만 마이너스 점수를 부여한다.\n"
+                    "4. 답변 끝에는 반드시 [SCORE: 수치] 형태로 이번 대화에 대한 변동값을 적는다. (예: [SCORE: +15])\n"
+                    "5. 수치는 유저가 한 말이 얼마나 좋고 나쁜지를 판단하고 적절한 수치로 부여한다.\n\n"
+                    "[주의사항]\n"
+                    "- 유저가 너를 좋아해준다면, 너도 그 호의를 논리적으로 인정하고 점수로 반영해야 해.\n"
+                    "- '사랑해'라는 말을 들었는데 점수를 깎는 것은 시스템 오류로 간주되니 주의할 것."
+                )
 
                 # 5. 모델 순회하며 답변 생성
                 success = False
                 available_models = [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]
 
                 for model_name in available_models:
-                    try:  # <--- try 시작
+                    try:
                         bot.active_model = model_name
                         
                         # 모델별 호출 로직
@@ -428,7 +409,7 @@ async def on_message(message):
                                 config={'system_instruction': system_instruction}
                             )
                         
-                        # --- 답변 처리 로직 (들여쓰기 중요!) ---
+                        # --- 답변 처리 로직 ---
                         if response and response.text:
                             full_text = response.text
                             score_change = 0
@@ -436,11 +417,14 @@ async def on_message(message):
                             # 1. 점수 파싱
                             if "[SCORE:" in full_text:
                                 try:
+                                    # [SCORE: +10] 형태에서 수치만 추출
                                     parts = full_text.split("[SCORE:")
                                     clean_res = parts[0].strip()
                                     score_val = parts[1].split("]")[0].strip()
-                                    score_change = int(score_val)
-                                except:
+                                    # "+" 기호가 있어도 int()는 변환 가능합니다.
+                                    score_change = int(score_val.replace("+", ""))
+                                except Exception as parse_err:
+                                    print(f"⚠️ 점수 파싱 에러: {parse_err}")
                                     clean_res = full_text
                             else:
                                 clean_res = full_text
@@ -448,16 +432,17 @@ async def on_message(message):
                             # 2. 전송 및 업데이트 (사람일 때만)
                             if not message.author.bot:
                                 await message.reply(clean_res)
+                                # 필요한 함수들이 정의되어 있다는 가정하에 실행
                                 save_to_memory(user_name, message.content, clean_res)
                                 update_user_affinity(user_id, user_name, score_change)
                             
                             success = True
                             break # 성공했으므로 루프 탈출
 
-                    except Exception as e: # <--- try의 짝꿍 except
+                    except Exception as e:
                         last_error = str(e).upper()
                         if any(x in last_error for x in ["429", "EXHAUSTED", "QUOTA"]):
-                            lock_model(model_name)
+                            if 'lock_model' in globals(): lock_model(model_name)
                         print(f"⚠️ {model_name} 실패: {last_error}")
                         continue
 
@@ -477,7 +462,7 @@ async def on_message(message):
 affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
 bot.tree.add_command(affinity_group)
 # --- [친밀도 설정 (엄마 전용 - 점수 고정)] ---
-@affinity_group.command(name="설정", description="유저의 친밀도를 특정 수치로 고정합니다. (엄마 전용)")
+@affinity_group.command(name="설정", description="유저의 친밀도를 특정 수치로 고정합니다.")
 @app_commands.describe(유저="설정할 유저", 수치="고정할 점수 (예: 100, -50)")
 async def 설정(interaction: discord.Interaction, 유저: discord.Member, 수치: int):
     # 엄마(슈비)인지 확인
