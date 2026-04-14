@@ -113,7 +113,6 @@ class MyBot(commands.Bot):
         
         self.auto_join_enabled = True
         self.is_processing = False  # 뜌비가 생각 중인지 확인 (최적화 핵심!)
-        self.active_model = "대기 중"
         self.current_personality = "기본"  # 뜌비의 성격 상태
 
     async def setup_hook(self):
@@ -292,6 +291,7 @@ async def on_message(message):
                     "3. 욕설/비하 시에만 마이너스 점수.\n"
                     "4. 답변 끝에 반드시 [SCORE: 수치] 포함. (예: [SCORE: +15])\n"
                     "5. '사랑해'를 들었는데 점수를 깎는 실수를 하지 마."
+					"6. 최대 변동 수치는 +20점 까지야."
                 )
 
 # 5. 모델 순회하며 답변 생성
@@ -507,10 +507,6 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
 # --- [모델 상태 확인] ---
 @bot.tree.command(name="모델", description="현재 뜌비봇의 모델 상태를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
-    if interaction.user.id != SHUVI_USER_ID:
-        await interaction.response.send_message("뜌비의 내부 상태는 슈비 엄마만 볼 수 있어! 🤫", ephemeral=True)
-        return
-
     status_msg = "🤖 **뜌비봇 모델 실시간 가동 현황**\n"
     status_msg += "*(매일 오후 4시 자동 리셋)*\n"
     status_msg += "━━━━━━━━━━━━━━━━━━\n"
@@ -518,18 +514,22 @@ async def 모델확인(interaction: discord.Interaction):
     for i, model in enumerate(MODEL_LIST, 1):
         info = MODEL_STATUS.get(model, {"is_available": True})
         
-        # 순서 중요: 한도 초과를 가장 먼저 체크합니다.
+        # 1. 한도 초과(❌)가 가장 우선
         if not info["is_available"]:
             state = "❌ **한도 초과**"
-        elif model == bot.active_model:
+        
+        # 2. 한도가 남았고, 현재 '활성화된 모델(active_model)'이면 무조건 불꽃!
+        elif model == getattr(bot, 'active_model', None):
             state = "🔥 **작동 중**"
+            
+        # 3. 나머지는 순위 표시
         else:
             state = f"{i}순위"
             
         status_msg += f"{state}: `{model}`\n"
             
-    status_msg += f"━━━━━━━━━━━━━━━━━━\n🎭 현재 성격: **{bot.current_personality}**"
-    status_msg += f"\n🎙️ 자동 입장: **{'켜짐' if bot.auto_join_enabled else '꺼짐'}**"
+    status_msg += "━━━━━━━━━━━━━━━━━━\n"
+    status_msg += f"🎭 현재 성격: **{bot.current_personality}**"
     
     await interaction.response.send_message(status_msg)
 	
