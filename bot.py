@@ -557,24 +557,27 @@ async def your_gemini_function(user, text):
             # await play_tts_voice(reply_text)
 
     except Exception as top_e:
-        print(f"❌ 음성 처리 시스템 에러: {top_e}")
-    finally:
-        bot.is_processing = False
-        bot.active_model = "대기 중"
+            print(f"❌ 음성 처리 시스템 에러: {top_e}")
         
-        reply_text = response.text
-        print(f"🤖 [뜌비 답변]: {reply_text}")
+        finally:
+            bot.is_processing = False
+            bot.active_model = "대기 중"
+            
+            # response.text가 존재할 때만 처리하도록 안전장치 추가
+            try:
+                reply_text = response.text
+                print(f"🤖 [뜌비 답변]: {reply_text}")
 
-        # 2. 텍스트 채널에 기록 남기 (작업방 ID 사용)
-        channel = bot.get_channel(WORK_CHANNEL_ID)
-    if channel:
-        await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
+                # 2. 텍스트 채널에 기록 남기 (작업방 ID 사용)
+                channel = bot.get_channel(WORK_CHANNEL_ID)
+                if channel:
+                    await channel.send(f"🎙️ **{user.display_name}**: {text}\n🤖 **뜌비**: {reply_text}")
 
-        # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
-        # 예: await play_tts_voice(reply_text)
-
-    except Exception as e:
-        print(f"❌ 제미니 응답 실패: {e}")
+                # 3. 답변을 목소리로 재생 (슈비님의 기존 TTS 기능이 있다면 연결)
+                # 예: await play_tts_voice(reply_text)
+                
+            except Exception as e:
+                print(f"❌ 제미니 응답 실패 또는 처리 오류: {e}")
 
 
 # -----------------------------
