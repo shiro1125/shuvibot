@@ -144,6 +144,37 @@ def get_user_affinity(user_id, user_name):
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
+# 1위 역할 ID와 서버 ID (슈비님이 설정하신 값으로 바꾸세요)
+RANK_1_ROLE_ID = 1493551151323549767  # 실제 역할 ID
+
+async def update_rank_1_role():
+    guild = bot.get_guild(GUILD_ID_1) # 봇이 있는 서버
+    if not guild: return
+
+    # DB에서 랭킹 1위 정보 가져오기 (슈비님의 DB 함수 이름에 맞춰주세요)
+    # 예: "SELECT user_id FROM affinity_table ORDER BY score DESC LIMIT 1"
+    top_user_id = get_top_ranker_id() # 1위 ID만 가져온다고 가정
+    if not top_user_id: return
+
+    role = guild.get_role(RANK_1_ROLE_ID)
+    if not role: return
+
+    # 현재 왕관(역할)을 쓰고 있는 사람
+    current_winner = role.members[0] if role.members else None
+
+    # 이미 1위가 쓰고 있다면 패스
+    if current_winner and current_winner.id == top_user_id:
+        return
+
+    # 왕관 주인 바꾸기
+    if current_winner:
+        await current_winner.remove_roles(role)
+
+    new_winner = guild.get_member(top_user_id)
+    if new_winner:
+        await new_winner.add_roles(role)
+        print(f"👑 새로운 1위 탄생: {new_winner.display_name}")
+
 def update_user_affinity(user_id, user_name, amount):
     try:
         # 1. 기존 데이터 가져오기
@@ -557,6 +588,17 @@ async def 모델확인(interaction: discord.Interaction):
     await interaction.response.send_message(status_msg)
     
 # --- 자동 음성 채널 관리 및 알림 로직 (기존 유지) ---
+
+@tasks.loop(hours=1) # 1시간마다 체크
+async def rank_check_loop():
+    await update_rank_1_role()
+
+# on_ready 함수 안에서 루프 시작시키기
+@bot.event
+async def on_ready():
+    # ... 기존 코드 ...
+    if not rank_check_loop.is_running():
+        rank_check_loop.start()
 
 @tasks.loop(minutes=1)
 async def control_voice_channel():
