@@ -178,7 +178,8 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-   	if bot.user.mentioned_in(message) or "뜌비" in message.content:
+    # 여기 들여쓰기가 탭(Tab)이랑 스페이스가 섞여있었을 거예요!
+    if bot.user.mentioned_in(message) or "뜌비" in message.content:
         async with message.channel.typing():
             # 1. 데이터 가져오기
             history_context = get_memory_from_db()
