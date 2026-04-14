@@ -375,32 +375,40 @@ async def on_message(message):
                 print(f"🔍 [시스템] 현재 가용한 모델 순서: {available_models}")
 
                 for model_name in available_models:
-                    try:
-                        bot.active_model = model_name
-                        
-                     # 봇의 메인 루프를 가져옵니다.
+            try:
+                bot.active_model = model_name
+                
+                # 봇의 메인 루프를 가져옵니다.
                 loop = asyncio.get_event_loop()
 
                 if "gemma" in model_name.lower():
                     prompt = f"[시스템 지침]\n{system_instruction}\n\n유저 메시지: {full_content}"
-    # 비동기로 실행하여 봇이 멈추는 것을 방지합니다.
-                response = await loop.run_in_executor(
-                None, lambda: client.models.generate_content(model=model_name, contents=prompt)
-                )
-                else:
-    # Gemini 모델 호출을 비동기 스레드에서 실행합니다.
+                    # 비동기로 실행하여 봇이 멈추는 것을 방지합니다.
                     response = await loop.run_in_executor(
-                    None, 
-                    lambda: client.models.generate_content(
-                    model=model_name,
-                    contents=full_content,
-                    config={'system_instruction': system_instruction}
-                )
-            )
-                        
-                        if response and response.text:
-                            full_text = response.text
-                            score_change = 0
+                        None, 
+                        lambda: client.models.generate_content(model=model_name, contents=prompt)
+                    )
+                else:
+                    # Gemini 모델 호출을 비동기 스레드에서 실행합니다.
+                    response = await loop.run_in_executor(
+                        None, 
+                        lambda: client.models.generate_content(
+                            model=model_name,
+                            contents=full_content,
+                            config={'system_instruction': system_instruction}
+                        )
+                    )
+
+                # 응답이 성공적으로 왔을 경우 처리
+                if response and response.text:
+                    full_text = response.text
+                    score_change = 0
+                    success = True  # 성공 플래그 세우기
+                    break           # 성공했으므로 다음 모델 시도 중단 (루프 탈출)
+
+            except Exception as e:
+                print(f"⚠️ {model_name} 호출 중 오류 발생: {e}")
+                continue  # 다음 모델로 넘어가서 재시도
                             
                            # 점수 파싱 및 텍스트 정제
                             if "[SCORE:" in full_text:
