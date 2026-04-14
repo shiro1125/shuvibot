@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from gtts import gTTS
+import edge_tts  # 1. 이거 추가
 import os
 
 class TTS(commands.Cog):
@@ -19,11 +19,11 @@ class TTS(commands.Cog):
         filename = f"voice_{interaction.user.id}.mp3"
 
         try:
-            # gTTS 파일 생성
-            tts = gTTS(text=텍스트, lang='ko')
-            tts.save(filename)
+            # 2. 이 부분이 gTTS 대신 edge-tts로 바뀌는 핵심이에요!
+            # ko-KR-SunHiNeural은 아주 맑은 여성 목소리입니다.
+            communicate = edge_tts.Communicate(텍스트, "ko-KR-SunHiNeural")
+            await communicate.save(filename)
 
-            # 음성 채널 연결 로직
             vc = interaction.guild.voice_client
             if not vc:
                 vc = await channel.connect()
@@ -33,8 +33,7 @@ class TTS(commands.Cog):
             if vc.is_playing():
                 vc.stop()
 
-           # 재생 및 파일 삭제 (이 부분을 수정합니다)
-            # executable="/usr/bin/ffmpeg" 를 추가해서 경로를 직접 알려주는 거예요!
+            # 3. 이전에 성공했던 ffmpeg 설정은 그대로 유지!
             source = discord.FFmpegPCMAudio(filename, executable="ffmpeg")
             
             vc.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
