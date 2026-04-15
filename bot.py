@@ -76,8 +76,9 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         # 모듈/Cog 로드
-        # voicechat, reaction_speed 외에도 trpg 모듈을 추가하여 TRPG 시스템을 제공합니다.
-        extensions = ['tts', 'blackjack', 'scheduler', 'voicechat', 'reaction_speed', 'trpg']
+        # voicechat 모듈뿐만 아니라 reaction_speed 모듈을 추가하여 기능을 확장합니다.
+        # 새로 추가된 reaction_speed 모듈은 반응속도 게임 기능을 제공합니다.
+        extensions = ['tts', 'blackjack', 'scheduler', 'voicechat', 'reaction_speed']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
