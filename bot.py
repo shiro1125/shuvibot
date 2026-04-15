@@ -74,7 +74,8 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         # 모듈/Cog 로드
-        extensions = ['tts', 'blackjack', 'scheduler']
+        # voicechat 모듈을 추가하여 음성 기능을 활성화합니다.
+        extensions = ['tts', 'blackjack', 'scheduler', 'voicechat']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
@@ -239,10 +240,14 @@ async def 확인(interaction: discord.Interaction, 유저: discord.Member = None
     target = 유저 or interaction.user
     affinity = affinity_manager.get_user_affinity(target.id, target.display_name)
 
-    if affinity > 70: status = "영원한 단짝 💖"
-    elif affinity > 30: status = "친한 친구 😊"
-    elif affinity >= 0: status = "안면 있는 사이 😐"
-    else: status = "조심해야 할 사람 💀"
+    if affinity > 70:
+        status = "영원한 단짝 💖"
+    elif affinity > 30:
+        status = "친한 친구 😊"
+    elif affinity >= 0:
+        status = "안면 있는 사이 😐"
+    else:
+        status = "조심해야 할 사람 💀"
 
     await interaction.response.send_message(
         f"📊 **{target.display_name}**님과 뜌비의 친밀도는 **{affinity}점**이야! (현재 상태: {status})"
@@ -263,7 +268,6 @@ async def 랭킹(interaction: discord.Interaction):
         msg += f"{medal} {r['user_name']} ― `{r.get('affinity', 0)}점` (💬 {r.get('chat_count', 0)}회)\n"
     await interaction.followup.send(msg)
 
-
 @bot.tree.command(name="성격", description="뜌비의 성격을 변경합니다.")
 @app_commands.choices(설정=[
     app_commands.Choice(name="기본", value="기본"),
@@ -278,7 +282,6 @@ async def 성격변경(interaction: discord.Interaction, 설정: app_commands.Ch
 
     bot.current_personality = 설정.value
     await interaction.response.send_message(f"✅ 뜌비의 성격이 **{설정.value}** 상태로 바뀌었어!")
-
 
 @bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
 @app_commands.choices(상태=[
@@ -295,7 +298,6 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
         await interaction.guild.voice_client.disconnect()
 
     await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
-
 
 @bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
@@ -315,7 +317,6 @@ async def 모델확인(interaction: discord.Interaction):
     status_msg += f"🧠 **현재 활성 모델: {bot.active_model}**"
 
     await interaction.response.send_message(status_msg)
-
 
 if __name__ == '__main__':
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}, daemon=True).start()
