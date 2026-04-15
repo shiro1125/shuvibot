@@ -1,65 +1,105 @@
+# scheduler.py
 import discord
-from discord.ext import tasks
+from discord.ext import commands, tasks
 from datetime import datetime
 import pytz
+import affinity_manager
 
-# 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
 
-# --- [여기가 중요!] bot.py에서 가져다 쓸 ID 값들 ---
-GUILD_ID_1 = 1228372760212930652
-GUILD_ID_2 = 1170313139225640972
-STUDY_CHANNEL_ID = 1358176930725236968
-WORK_CHANNEL_ID = 1296431232045027369
-ANNOUNCEMENT_CHANNEL_ID = 1358394433665634454
-RANK_1_ROLE_ID = 1493551151323549767
+class SchedulerCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.GUILD_ID_1 = 1228372760212930652
+        self.GUILD_ID_2 = 1170313139225640972
+        self.WORK_CHANNEL_ID = 1296431232045027369
+        self.ANNOUNCEMENT_CHANNEL_ID = 1358394433665634454
+        self.RANK_1_ROLE_ID = 1493551151323549767
+        
+        self.rank_check_loop.start()
+        print("👑 [시스템] 랭킹 체크 루프 시작!")
+        self.control_voice_channel.start()
+        print("🎙️ [시스템] 자동 입장 루프 시작!")
+        self.send_notifications.start()
+        print("🔔 [시스템] 알림 루프 시작!")
 
-def setup_scheduler(bot):
-    @tasks.loop(minutes=1)
-    async def study_and_voice_loop():
-        now = datetime.now(korea)
-        guild = bot.get_guild(GUILD_ID_1)
+    def cog_unload(self):
+        self.rank_check_loop.cancel()
+        self.control_voice_channel.cancel()
+        self.send_notifications.cancel()
+
+    @tasks.loop(hours=1)
+    async def rank_check_loop(self):
+        guild = self.bot.get_guild(self.GUILD_ID_1)
         if not guild: return
 
-        # 스터디 채널 관리 (18:00 ~ 23:00)
-        study_ch = guild.get_channel(STUDY_CHANNEL_ID)
-        if study_ch:
-            study_role = discord.utils.get(guild.roles, name="스터디")
-            is_study_time = 18 <= now.hour <= 23
-            
-            # 권한 설정 (기본은 접속 불가, 스터디 역할만 시간대에 따라 가능)
-            await study_ch.set_permissions(guild.default_role, connect=False)
-            await study_ch.set_permissions(study_role, connect=is_study_time)
-            
-            new_name = "🟢 스터디" if is_study_time else "🔴 스터디"
-            if study_ch.name != new_name:
-                await study_ch.edit(name=new_name)
+        top_user_id = affinity_manager.get_top_ranker_id()
+        if not top_user_id: return
 
-        # 자동 입장 기능
-        if bot.auto_join_enabled:
-            work_ch = guild.get_channel(WORK_CHANNEL_ID)
-            if work_ch and (not guild.voice_client or not guild.voice_client.is_connected()):
-                try:
-                    await work_ch.connect(reconnect=True, timeout=20)
-                except Exception as e:
-                    print(f"❌ 자동 입장 실패: {e}")
+        role = guild.get_role(self.RANK_1_ROLE_ID)
+        if not role: return
+
+        current_winner = role.members[0] if role.members else None
+        if current_winner and current_winner.id == top_user_id: return
+
+        if current_winner:
+            try:
+                await current_winner.remove_roles(role)
+            except Exception as e:
+                print(f"❌ 기존 1위 역할 제거 실패: {e}")
+
+        new_winner = guild.get_member(top_user_id)
+        if new_winner:
+            try:
+                await new_winner.add_roles(role)
+                print(f"👑 새로운 1위 탄생: {new_winner.display_name}")
+            except Exception as e:
+                print(f"❌ 새 1위 역할 부여 실패: {e}")
 
     @tasks.loop(minutes=1)
-    async def class_notification_loop():
-        now = datetime.now(korea)
-        # 토요일 17:50 체크
-        if now.weekday() == 5 and now.hour == 17 and now.minute == 50:
-            guild = bot.get_guild(GUILD_ID_2)
-            if not guild: return
-            
-            ann_ch = guild.get_channel(ANNOUNCEMENT_CHANNEL_ID)
-            role = discord.utils.get(guild.roles, name="수강생")
-            week_num = (now.day - 1) // 7 + 1
-            
-            if ann_ch and role:
-                if week_num == 5:
-                    await ann_ch.send("이번주는 휴강입니다.")
-                else:
-                    await ann_ch.send(f"{role.mention} 📢 수업 10분전 입니다!")
+    async def control_voice_channel(self):
+        now_korea = datetime.now(korea)
 
-    return study_and_voice_loop, class_notification_loop
+        if now_korea.hour == 16 and now_korea.minute == 0:
+            self.bot.reset_model_status()
+        
+        if self.bot.auto_join_enabled:
+            guild = self.bot.get_guild(self.GUILD_ID_1)
+            if not guild:
+                print("⚠️ [자동입장] 서버를 찾을 수 없습니다.")
+                return
+            work_channel = guild.get_channel(self.WORK_CHANNEL_ID)
+            if not work_channel:
+                print("⚠️ [자동입장] 작업 채널 ID가 올바르지 않습니다.")
+                return
+            
+            vc = guild.voice_client
+            if vc is None or not vc.is_connected():
+                try:
+                    print(f"🔄 [자동입장] {work_channel.name} 접속 시도 중...")
+                    await work_channel.connect(reconnect=True, timeout=20)
+                except Exception as e:
+                    print(f"❌ [자동입장] 접속 실패: {e}")
+            elif vc.channel and vc.channel.id != self.WORK_CHANNEL_ID:
+                try:
+                    await vc.move_to(work_channel)
+                    print(f"🔄 [자동입장] {work_channel.name}으로 이동 완료.")
+                except Exception as e:
+                    print(f"❌ [자동입장] 이동 실패: {e}")
+
+    @tasks.loop(minutes=1)
+    async def send_notifications(self):
+        now_korea = datetime.now(korea)
+        if now_korea.weekday() == 5 and now_korea.hour == 17 and now_korea.minute == 50:
+            guild = self.bot.get_guild(self.GUILD_ID_2)
+            if not guild: return
+            announcement_channel = guild.get_channel(self.ANNOUNCEMENT_CHANNEL_ID)
+            study_role = discord.utils.get(guild.roles, name="수강생")
+            if announcement_channel and study_role:
+                try:
+                    await announcement_channel.send(f"{study_role.mention} 📢 수업 10분전 입니다!")
+                except Exception as e:
+                    print(f"❌ 알림 전송 실패: {e}")
+
+async def setup(bot):
+    await bot.add_cog(SchedulerCog(bot))
