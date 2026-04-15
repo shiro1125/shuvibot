@@ -60,6 +60,16 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
+# --- 명령어: 모델 관리 ---
+@bot.tree.command(name="모델", description="현재 사용 중인 AI 모델 상태를 확인합니다.")
+async def model_info(it: discord.Interaction):
+    msg = f"🤖 **뜌비 상태 보고**\n- 현재 성격: `{bot.current_personality}`\n\n**모델 가동 현황:**\n"
+    for m in MODEL_LIST:
+        status = "✅ 가동 가능" if MODEL_STATUS[m]["is_available"] else "❌ 한도 초과"
+        msg += f"- `{m}`: {status}\n"
+    await it.response.send_message(msg)
+
+
 # --- 명령어: 친밀도 그룹 ---
 친밀도 = app_commands.Group(name="친밀도", description="뜌비와의 관계를 관리해!")
 
