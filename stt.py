@@ -9,6 +9,15 @@ r = sr.Recognizer()
 
 
 class BasicSink(voice_recv.AudioSink):
+    """
+    음성 패킷을 받아 버퍼에 저장하고 일정 시간 침묵이 감지되면
+    Google SpeechRecognition을 통해 텍스트로 변환하여 콜백을 호출합니다.
+
+    이 구현에는 자세한 로그가 포함되어 있어 디버깅 시 누가 말했고
+    얼마나 많은 오디오 데이터가 수신되었는지, 언제 STT가 실행됐는지 등을
+    콘솔에서 확인할 수 있습니다.
+    """
+
     def __init__(self, bot, text_callback):
         super().__init__()
         self.bot = bot
@@ -40,6 +49,15 @@ class BasicSink(voice_recv.AudioSink):
             if not pcm:
                 return
 
+            # 로그: 오디오 패킷 수신
+            try:
+                print(
+                    f"[STT] 오디오 패킷 수신: 사용자 {user.display_name} ({user.id}), 길이 {len(pcm)}",
+                    flush=True,
+                )
+            except Exception:
+                pass
+
             # write는 sync 함수라 직접 await 못 하므로 빠르게 버퍼 추가만 처리
             self.audio_buffer.extend(pcm)
             self.last_speaking_time = time.time()
@@ -54,7 +72,7 @@ class BasicSink(voice_recv.AudioSink):
                 )
 
         except Exception as e:
-            print(f"⚠️ [음성 시스템] 패킷 처리 중 오류 발생: {e}", flush=True)
+            print(f"⚠️ [STT] 패킷 처리 중 오류 발생: {e}", flush=True)
 
     async def check_silence(self):
         """침묵을 감지하고 텍스트 변환을 시작합니다."""
@@ -76,6 +94,15 @@ class BasicSink(voice_recv.AudioSink):
                         self.audio_buffer = bytearray()
                         self.current_user = None
 
+                    # 로그: 침묵 감지 및 STT 시작
+                    try:
+                        print(
+                            f"[STT] 침묵 감지됨. 사용자 {getattr(user, 'display_name', '?')}의 음성 변환을 시작합니다.",
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
+
                     try:
                         text = await transcribe_audio(audio_to_process)
                     except Exception as e:
@@ -83,12 +110,17 @@ class BasicSink(voice_recv.AudioSink):
                         text = None
 
                     if text and user:
-                        print(f"🎙️ [STT 인식 결과]: {text}", flush=True)
-
+                        try:
+                            print(
+                                f"[STT] 변환된 텍스트: 사용자 {user.display_name} ({user.id}) -> '{text}'",
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
                         try:
                             await self.text_callback(user, text)
                         except Exception as e:
-                            print(f"❌ [음성 시스템] text_callback 실행 실패: {e}", flush=True)
+                            print(f"❌ [STT] text_callback 실행 실패: {e}", flush=True)
 
                     break
 
@@ -100,7 +132,7 @@ class BasicSink(voice_recv.AudioSink):
                     break
 
         except Exception as e:
-            print(f"❌ [음성 시스템] check_silence 내부 오류: {e}", flush=True)
+            print(f"❌ [STT] check_silence 내부 오류: {e}", flush=True)
 
         finally:
             self.is_processing = False
@@ -121,6 +153,9 @@ async def transcribe_audio(audio_bytes):
         return None
 
     try:
+        # 로그: STT 시작
+        print(f"[STT] 음성 데이터 길이 {len(audio_bytes)} bytes. 음성을 텍스트로 변환합니다.", flush=True)
+
         # 디스코드 PCM: 48000Hz, 16-bit, 2채널
         audio_data = sr.AudioData(audio_bytes, 48000, 2)
 
@@ -136,9 +171,9 @@ async def transcribe_audio(audio_bytes):
         return None
 
     except sr.RequestError as e:
-        print(f"❌ Google STT 서비스 에러: {e}", flush=True)
+        print(f"❌ [STT] Google STT 서비스 에러: {e}", flush=True)
         return None
 
     except Exception as e:
-        print(f"❌ STT 변환 중 예상치 못한 에러: {e}", flush=True)
+        print(f"❌ [STT] STT 변환 중 예상치 못한 에러: {e}", flush=True)
         return None
