@@ -143,7 +143,7 @@ async def 모델확인(interaction: discord.Interaction):
 @친밀도.command(name="확인", description="상대방 혹은 나의 친밀도를 확인합니다.")
 async def aff_check(it: discord.Interaction, 유저: discord.Member = None):
     target = 유저 or it.user
-    res = supabase.table("users").select("affinity, chat_count").eq("user_id", str(target.id)).execute()
+    res = supabase.table("user_stats").select("affinity, chat_count").eq("user_id", str(target.id)).execute()
     if res.data:
         score, chats = res.data[0]['affinity'], res.data[0]['chat_count']
     else:
