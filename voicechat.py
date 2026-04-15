@@ -28,17 +28,35 @@ try:
     import discord.opus as _discord_opus  # type: ignore
     _orig_decode = _opus_module.Decoder.decode
 
-    def _safe_decode(self, data, fec=False):  # type: ignore
+    def _safe_decode(self, data, *, fec=False):  # type: ignore
+        """
+        Wrapped decoder that catches decoding errors and preserves the original
+        function signature. The underlying ``Decoder.decode`` function expects
+        ``fec`` as a keyword‑only argument. This wrapper forwards ``fec``
+        correctly and catches both ``OpusError`` and ``TypeError``. If an
+        exception occurs, it logs the error and returns empty bytes to avoid
+        crashing the voice receive loop.
+        """
         try:
-            return _orig_decode(self, data, fec)
-        except _discord_opus.OpusError as oe:
-            logging.warning(f"[VOICECHAT] Opus decode error: {oe}. Skipping packet")
+            # Explicitly forward fec as a keyword argument to avoid positional
+            # argument errors on C‑bound decode implementations.
+            return _orig_decode(self, data, **{'fec': fec})
+        except (TypeError, _discord_opus.OpusError) as exc:
+            logging.warning(
+                f"[VOICECHAT] Decoder error while processing voice packet: {exc}. Packet dropped"
+            )
             return b""
 
+    # Monkey‑patch the decode method with our safe implementation
     _opus_module.Decoder.decode = _safe_decode  # type: ignore
-    logging.info("[VOICECHAT] Patched Opus decoder to handle corrupted stream errors")
+    logging.info("[VOICECHAT] Patched Opus decoder to handle decoding errors")
 except Exception as e:
     logging.warning(f"[VOICECHAT] Failed to patch Opus decoder: {e}")
+
+# Ensure that our log messages show up by configuring the root logger if it
+# hasn't already been configured by the main bot. Without this, our INFO
+# messages might be suppressed depending on the default logging level.
+logging.basicConfig(level=logging.INFO)
 
 # Internal import: BasicSink for collecting audio and performing STT
 from stt import BasicSink
