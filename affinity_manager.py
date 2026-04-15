@@ -71,12 +71,22 @@ def get_affinity_ranking(limit=30):
         print(f"❌ 랭킹 로딩 에러: {e}")
         return []
 
+# ... (기존 상단 코드 동일)
+
 def get_attitude_guide(affinity):
-    """친밀도에 따른 뜌비의 태도 가이드를 반환합니다."""
-    if affinity >= 100: return "매우 친근하고 애교 섞인 태도"
-    if affinity >= 50: return "친절하고 장난스러운 태도"
-    if affinity >= 0: return "기본적인 예의를 지키는 태도"
-    return "경계하고 쌀쌀맞은 태도"
+    """친밀도 단계에 따른 뜌비의 태도 가이드를 반환합니다."""
+    if affinity <= -31:
+        return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+    elif -30 <= affinity <= -1:
+        return "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+    elif 0 <= affinity <= 30:
+        return "비즈니스 상태. 무미건조하고 딱딱한 태도."
+    elif 31 <= affinity <= 70:
+        return "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
+    else:
+        return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
+
+# ... (나머지 함수 동일)
 
 def get_memory_from_db(user_name):
     """최근 대화 기억 15개를 불러옵니다."""
