@@ -1,28 +1,23 @@
 # affinity_manager.py
-
 import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Supabase 설정
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 테이블 이름
-TABLE_NAME = "user_stats"
-
 def get_user_affinity(user_id, user_name):
-    """유저의 친밀도를 조회하고, 없으면 생성합니다."""
+    """유저의 친밀도를 조회하고, 없으면 생성합니다 (옛날 코드 로직 100% 동일)"""
     try:
-        res = supabase.table(TABLE_NAME).select("affinity").eq("user_id", str(user_id)).execute()
+        res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
         if res.data:
             return res.data[0]['affinity']
         else:
-            supabase.table(TABLE_NAME).insert({
-                "user_id": str(user_id),
+            supabase.table("user_stats").upsert({
+                "user_id": user_id,
                 "user_name": user_name,
                 "affinity": 0,
                 "chat_count": 0
@@ -32,52 +27,66 @@ def get_user_affinity(user_id, user_name):
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
-def get_attitude_guide(affinity):
-    """친밀도 단계 가이드"""
-    if affinity <= -31:
-        return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
-    elif -30 <= affinity <= -1:
-        return "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
-    elif 0 <= affinity <= 30:
-        return "비즈니스 상태. 무미건조하고 딱딱한 태도."
-    elif 31 <= affinity <= 70:
-        return "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
-    else:
-        return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
-
-def update_user_affinity(user_id, user_name, amount, reset=False):
-    """친밀도와 채팅 횟수를 업데이트합니다."""
+def update_user_affinity(user_id, user_name, amount):
     try:
-        res = supabase.table(TABLE_NAME).select("affinity, chat_count").eq("user_id", str(user_id)).execute()
-        
+        res = supabase.table("user_stats").select("affinity, chat_count").eq("user_id", user_id).execute()
         if res.data:
-            current_affinity = res.data[0].get('affinity', 0)
-            current_chats = res.data[0].get('chat_count', 0)
-            
-            new_affinity = amount if reset else current_affinity + amount
-            new_chats = current_chats + 1
-            
-            supabase.table(TABLE_NAME).update({
-                "affinity": new_affinity,
-                "chat_count": new_chats,
-                "user_name": user_name
-            }).eq("user_id", str(user_id)).execute()
-            return current_affinity, new_affinity
+            current_affinity = res.data[0].get("affinity", 0)
+            current_chat_count = res.data[0].get("chat_count", 0)
         else:
-            new_affinity = amount
-            supabase.table(TABLE_NAME).insert({
-                "user_id": str(user_id),
-                "user_name": user_name,
-                "affinity": new_affinity,
-                "chat_count": 1
-            }).execute()
-            return 0, new_affinity
+            current_affinity = 0
+            current_chat_count = 0
+
+        new_affinity = current_affinity + amount
+        new_chat_count = current_chat_count + 1
+
+        supabase.table("user_stats").upsert({
+            "user_id": user_id,
+            "user_name": user_name,
+            "affinity": new_affinity,
+            "chat_count": new_chat_count
+        }).execute()
+
+        diff_str = f"+{amount}" if amount >= 0 else f"{amount}"
+        print(f"✅ {user_name} 친밀도 업데이트: {current_affinity} -> {new_affinity} ({diff_str})", flush=True)
     except Exception as e:
-        print(f"❌ 친밀도 업데이트 에러: {e}")
-        return 0, 0
+        print(f"❌ 친밀도 업데이트 실패: {e}")
+
+def set_user_affinity(user_id, user_name, target_score):
+    try:
+        res = supabase.table("user_stats").select("chat_count").eq("user_id", user_id).execute()
+        current_chat_count = res.data[0].get("chat_count", 0) if (res and res.data and len(res.data) > 0) else 0
+
+        supabase.table("user_stats").upsert({
+            "user_id": user_id,
+            "user_name": user_name,
+            "affinity": target_score,
+            "chat_count": current_chat_count
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"❌ 친밀도 설정 에러: {e}")
+        return False
+
+def get_top_ranker_id():
+    try:
+        res = supabase.table("user_stats").select("user_id").order("affinity", desc=True).limit(1).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]['user_id']
+        return None
+    except Exception as e:
+        print(f"❌ 1위 조회 에러 (get_top_ranker_id): {e}")
+        return None
+
+def get_affinity_ranking(limit=30):
+    try:
+        res = supabase.table("user_stats").select("user_name, affinity, chat_count").order("affinity", desc=True).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"❌ 랭킹 조회 에러: {e}")
+        return []
 
 def get_memory_from_db(user_name):
-    """최근 대화 기억 15개를 불러옵니다."""
     try:
         res = supabase.table("memory").select("*").eq("user_name", user_name).order("created_at", desc=True).limit(15).execute()
         memory_list = res.data or []
@@ -90,7 +99,6 @@ def get_memory_from_db(user_name):
         return ""
 
 def save_to_memory(user_name, user_msg, bot_res):
-    """대화 내용을 DB에 저장합니다."""
     try:
         supabase.table("memory").insert({
             "user_name": user_name,
@@ -100,22 +108,14 @@ def save_to_memory(user_name, user_msg, bot_res):
     except Exception as e:
         print(f"❌ 기억 저장 에러: {e}")
 
-def get_top_ranker_id():
-    """전체 1위 유저의 ID를 가져옵니다."""
-    try:
-        res = supabase.table(TABLE_NAME).select("user_id").order("affinity", desc=True).limit(1).execute()
-        if res.data:
-            return int(res.data[0]['user_id'])
-        return None
-    except Exception as e:
-        print(f"❌ 랭커 조회 에러: {e}")
-        return None
-
-def get_affinity_ranking(limit=30):
-    """친밀도 랭킹 리스트를 가져옵니다."""
-    try:
-        res = supabase.table(TABLE_NAME).select("user_name, affinity, chat_count").order("affinity", desc=True).limit(limit).execute()
-        return res.data or []
-    except Exception as e:
-        print(f"❌ 랭킹 조회 에러: {e}")
-        return []
+def get_attitude_guide(affinity):
+    if affinity <= -31:
+        return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
+    elif -30 <= affinity <= -1:
+        return "불편/경계 상태. 날이 서 있고 말수가 적으며 공격적임."
+    elif 0 <= affinity <= 30:
+        return "비즈니스 상태. 무미건조하고 딱딱한 태도."
+    elif 31 <= affinity <= 70:
+        return "호감 상태. 편하게 말하고 다정하고 친근하게 대함."
+    else:
+        return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
