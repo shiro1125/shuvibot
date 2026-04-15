@@ -323,19 +323,19 @@ class ReactionSpeedCog(commands.Cog):
         # 2~5초 사이 랜덤 대기
         await asyncio.sleep(random.uniform(2.0, 5.0))
 
-        # 게임 시작 시각 저장
-        view.start_time = time.perf_counter()
-
         # '지금!' 메시지로 embed 업데이트
-        embed = discord.Embed(title="반응속도 게임", color=discord.Color.gold())
-        embed.add_field(
+        embed_now = discord.Embed(title="반응속도 게임", color=discord.Color.gold())
+        embed_now.add_field(
             name="지금!", value="지금 버튼을 누르세요!", inline=False
         )
-        embed.set_footer(text="버튼을 눌러서 반응속도를 측정해보세요.")
+        embed_now.set_footer(text="버튼을 눌러서 반응속도를 측정해보세요.")
 
-        # 메시지 수정 (embed와 view는 동일, 버튼 활성 상태 유지)
+        # 메시지 수정 후 반응 시작 시각을 기록합니다. 네트워크 지연을 고려하여
+        # 메시지 수정이 완료된 직후에 start_time을 설정합니다.
         if view.message:
-            await view.message.edit(embed=embed, view=view)
+            await view.message.edit(embed=embed_now, view=view)
+            # 메시지 수정 후 시점을 start_time으로 저장
+            view.start_time = time.perf_counter()
 
     @app_commands.guilds(discord.Object(id=1228372760212930652))
     @app_commands.command(name="반응속도랭킹", description="서버 내 반응속도 랭킹을 확인합니다.")
