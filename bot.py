@@ -42,9 +42,18 @@ class MyBot(commands.Bot):
         self.current_personality = "기본"
 
     async def setup_hook(self):
+        """봇 시작 시 블랙잭 로드 및 시스템 설정을 수행합니다."""
+        # 1. 블랙잭 확장 로드
+        try:
+            await self.load_extension('blackjack')
+            print("✅ 블랙잭 로드 완료")
+        except Exception as e:
+            print(f"❌ 블랙잭 로드 실패: {e}")
+
+        # 2. 루프 시작 및 명령어 동기화
         self.rank_update_loop.start()
         await self.tree.sync()
-        print("✅ 시스템 동기화 완료")
+        print("✅ 시스템 및 명령어 동기화 완료")
 
     @tasks.loop(hours=1)
     async def rank_update_loop(self):
@@ -68,7 +77,6 @@ async def model_info(it: discord.Interaction):
         status = "✅ 가동 가능" if MODEL_STATUS[m]["is_available"] else "❌ 한도 초과"
         msg += f"- `{m}`: {status}\n"
     await it.response.send_message(msg)
-
 
 # --- 명령어: 친밀도 그룹 ---
 친밀도 = app_commands.Group(name="친밀도", description="뜌비와의 관계를 관리해!")
