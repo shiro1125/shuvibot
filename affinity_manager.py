@@ -59,7 +59,7 @@ def update_user_affinity(user_id, user_name, amount):
         return 0
 
 def get_attitude_guide(affinity):
-    """bot.py에 정의된 구간 가이드 유지"""
+    """bot.py 파일 184~194행에 정의된 기준을 그대로 적용"""
     if affinity <= -31:
         return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
     elif -30 <= affinity <= -1:
@@ -71,10 +71,40 @@ def get_attitude_guide(affinity):
     else:
         return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
-def get_top_ranker_id():
-    """1위 조회 시 슈비(엄마)를 제외하지 않음"""
+def get_memory_from_db(user_name):
+    """bot.py에서 임포트 에러가 났던 바로 그 함수입니다!"""
     try:
-        # 특정 ID 제외 조건(.neq)을 삭제했습니다.
+        res = (
+            supabase.table("memory")
+            .select("*")
+            .eq("user_name", user_name)
+            .order("created_at", desc=True)
+            .limit(15)
+            .execute()
+        )
+        memory_list = res.data or []
+        formatted_memory = ""
+        for m in reversed(memory_list):
+            formatted_memory += f"{m['user_name']}: {m['user_msg']} -> 뜌비: {m['bot_res']}\n"
+        return formatted_memory
+    except Exception as e:
+        print(f"❌ 기억 불러오기 에러: {e}")
+        return ""
+
+def save_to_memory(user_name, user_msg, bot_res):
+    """대화 내용을 저장하는 함수"""
+    try:
+        supabase.table("memory").insert({
+            "user_name": user_name,
+            "user_msg": user_msg,
+            "bot_res": bot_res
+        }).execute()
+    except Exception as e:
+        print(f"❌ 기억 저장 에러: {e}")
+
+def get_top_ranker_id():
+    """슈비를 포함하여 1위를 조회합니다."""
+    try:
         res = supabase.table(TABLE_NAME).select("user_id").order("affinity", desc=True).limit(1).execute()
         if res.data and len(res.data) > 0:
             return res.data[0]['user_id']
@@ -84,7 +114,7 @@ def get_top_ranker_id():
         return None
 
 def get_affinity_ranking(limit=30):
-    """랭킹 리스트 출력 시 모든 유저 포함"""
+    """랭킹 리스트를 가져오는 함수"""
     try:
         res = (
             supabase.table(TABLE_NAME)
