@@ -113,67 +113,54 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# --- 명령어: 모델 관리 ---
-@bot.tree.command(name="모델", description="현재 사용 중인 AI 모델 상태를 확인합니다.")
-async def model_info(it: discord.Interaction):
-    msg = f"🤖 **뜌비 상태 보고**\n- 현재 성격: `{bot.current_personality}`\n- 활성 모델: `{bot.active_model}`\n\n**모델 가동 현황:**\n"
-    for m, s in MODEL_STATUS.items():
-        status = "✅ 가동 가능" if s["is_available"] else "❌ 한도 초과"
-        msg += f"- `{m}`: {status}\n"
-    await it.response.send_message(msg)
-
 # --- 명령어: 친밀도 그룹 ---
-친밀도 = app_commands.Group(name="친밀도", description="친밀도 관리")
+친밀도 = app_commands.Group(name="친밀도", description="뜌비와의 관계를 관리해!")
 
 @친밀도.command(name="확인", description="상대방과의 친밀도를 확인합니다.")
 async def aff_check(it: discord.Interaction, 유저: discord.Member = None):
     target = 유저 or it.user
-    # affinity_manager의 로직을 사용하여 정확한 점수 호출
     score = get_user_affinity(target.id, target.display_name)
     
+    # bot.py 기존 기준 유지
     if score > 70: status = "영원한 단짝 💖"
     elif score > 30: status = "친한 친구 😊"
     elif score >= 0: status = "안면 있는 사이 😐"
     else: status = "조심해야 할 사람 💀"
     
-    await it.response.send_message(f"📊 **{target.display_name}**님과 뜌비의 친밀도는 `{score}점`이야! (현재 상태: {status})")
+    await it.response.send_message(f"📊 **{target.display_name}**님과 뜌비의 친밀도는 `{score}점`이야! (상태: {status})")
 
-@친밀도.command(name="랭킹", description="뜌비의 절친 TOP 30 랭킹을 보여줍니다.")
+@친밀도.command(name="랭킹", description="친밀도 TOP 30을 확인합니다.")
 async def aff_ranking(it: discord.Interaction):
-    await it.response.defer()
+    await it.response.defer(ephemeral=False) # 타임아웃 방지
     try:
-        # 문법 오류(desc=True) 수정 및 정확한 테이블 조회
-        res = (
-            supabase.table("user_stats")
-            .select("user_name, affinity, chat_count")
-            .order("affinity", descending=True)
-            .limit(30)
-            .execute()
-        )
+        ranking_data = get_affinity_ranking(30)
+        if not ranking_data:
+            return await it.followup.send("⚠️ 아직 기록된 데이터가 없는 것 같아.")
 
-        if not res.data:
-            return await it.followup.send("아직 친한 사람이 없네... 😭")
+        rank_text = "🏆 **친밀도 TOP 30**\n" + "—" * 20 + "\n"
+        medals = ["🥇", "🥈", "🥉"]
+        for i, user in enumerate(ranking_data):
+            rank_icon = medals[i] if i < 3 else f"{i+1}위"
+            rank_text += f"{rank_icon} **{user.get('user_name', '??')}** — `{user.get('affinity', 0)}점` (`💬 {user.get('chat_count', 0)}회`)\n"
 
-        msg = "🏆 **뜌비의 절친 랭킹 (TOP 30)**\n━━━━━━━━━━━━━━━━━━\n"
-        for i, r in enumerate(res.data, 1):
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"**{i}위**")
-            name = r.get('user_name', '알 수 없음')
-            score = r.get('affinity', 0)
-            chats = r.get('chat_count', 0)
-            msg += f"{medal} {name} ― `{score}점` (💬 {chats}회)\n"
-
-        await it.followup.send(msg)
+        await it.followup.send(rank_text)
     except Exception as e:
-        print(f"❌ 랭킹 에러: {e}")
-        await it.followup.send("랭킹을 불러오지 못했어... 엄마, DB 연결 확인해줘! 😭")
+        await it.followup.send("🚨 랭킹 로드 중에 문제가 생겼어!")
 
 @친밀도.command(name="설정", description="친밀도 강제 설정 (슈비 전용)")
 async def aff_set(it: discord.Interaction, 유저: discord.Member, 점수: int):
     if it.user.id != SHUVI_USER_ID: 
         return await it.response.send_message("뜌비의 마음은 엄마만 정할 수 있어! 😤", ephemeral=True)
-    # update_user_affinity의 reset 파라미터를 사용하여 점수 고정
-    update_user_affinity(유저.id, 유저.display_name, 점수, reset=True)
-    await it.response.send_message(f"✅ **{유저.display_name}**님의 점수를 **{점수}점**으로 설정했어! ✨")
+    
+    # reset=True 대신 현재 점수와의 차이를 계산해서 업데이트
+    current = get_user_affinity(유저.id, 유저.display_name)
+    diff = 점수 - current
+    update_user_affinity(유저.id, 유저.display_name, diff)
+    
+    await it.response.send_message(f"✅ **{유저.display_name}**님의 점수를 **{점수}점**으로 맞췄어! ✨")
+
+# 그룹 등록 필수!
+bot.tree.add_command(친밀도)
 
 bot.tree.add_command(친밀도)
 
