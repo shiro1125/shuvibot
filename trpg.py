@@ -425,15 +425,17 @@ class TRPGCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # Cog 로드 시 /trpg 그룹을 명령 트리에 등록합니다. on_ready에서 중복 등록을 피하기 위해 한번만 실행합니다.
-        try:
-            self.bot.tree.add_command(self.trpg_group)
-            print("✅ TRPG 명령어 그룹 등록 완료!")
-        except Exception as e:
-            print(f"⚠️ TRPG 명령어 그룹 등록 실패 또는 이미 등록됨: {e}")
+        """TRPGCog가 준비되었을 때 호출됩니다. 현재 구현에서는 그룹 등록을 setup()에서 처리하므로 여기서는 아무 작업을 하지 않습니다."""
+        pass
 
 
 async def setup(bot: commands.Bot) -> None:
-    """Cog를 비동기로 등록합니다."""
+    """Cog를 비동기로 등록하고, TRPG 명령어 그룹을 명령 트리에 추가합니다."""
     cog = TRPGCog(bot)
     await bot.add_cog(cog)
+    try:
+        # Cog 등록 후 바로 TRPG 그룹을 명령 트리에 추가합니다. 이렇게 해야 봇의 setup_hook에서 동기화하기 전에 그룹이 등록됩니다.
+        bot.tree.add_command(cog.trpg_group)
+        print("✅ TRPG 명령어 그룹 등록 완료!")
+    except Exception as e:
+        print(f"⚠️ TRPG 명령어 그룹 등록 실패 또는 이미 등록됨: {e}")
