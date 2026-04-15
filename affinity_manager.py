@@ -9,7 +9,7 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 테이블 이름 (슈비님 DB 기준)
+# 테이블 이름
 TABLE_NAME = "user_stats"
 
 def get_user_affinity(user_id, user_name):
@@ -73,8 +73,8 @@ def get_affinity_ranking(limit=30):
 
 def get_attitude_guide(affinity):
     """친밀도에 따른 뜌비의 태도 가이드를 반환합니다."""
-    if affinity >= 100: return "매우 친근하고 애교 섞인 태도 (단짝)"
-    if affinity >= 50: return "친절하고 장난스러운 태도 (친구)"
+    if affinity >= 100: return "매우 친근하고 애교 섞인 태도"
+    if affinity >= 50: return "친절하고 장난스러운 태도"
     if affinity >= 0: return "기본적인 예의를 지키는 태도"
     return "경계하고 쌀쌀맞은 태도"
 
