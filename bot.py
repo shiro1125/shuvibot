@@ -74,13 +74,15 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         # 모듈/Cog 로드
-        # voicechat 모듈을 추가하여 음성 기능을 활성화합니다.
-        extensions = ['tts', 'blackjack', 'scheduler', 'voicechat']
+        # voicechat 모듈뿐만 아니라 reaction_speed 모듈을 추가하여 기능을 확장합니다.
+        # 새로 추가된 reaction_speed 모듈은 반응속도 게임 기능을 제공합니다.
+        extensions = ['tts', 'blackjack', 'scheduler', 'voicechat', 'reaction_speed']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
                 print(f"✅ {ext} 모듈 로드 완료!")
             except Exception as e:
+                # 로드 실패 시에도 다른 모듈이 로드되도록 오류를 출력하고 계속 진행합니다.
                 print(f"❌ {ext} 모듈 로드 실패: {e}")
 
 bot = MyBot()
