@@ -65,16 +65,28 @@ class VoiceChatCog(commands.Cog):
             channel = interaction.user.voice.channel
             try:
                 # 현재 길드에 접속된 VoiceClient 확인
+                # ... listen_control 함수 안의 ON 처리 부분 ...
+# 현재 길드에 접속된 VoiceClient 확인
                 vc = interaction.guild.voice_client
-                # VoiceRecvClient를 사용하여 연결되었는지 확인
-                if not vc or not isinstance(vc, voice_recv.VoiceRecvClient):
-                    # 연결되어 있지 않거나 일반 VoiceClient인 경우 재연결합니다.
+
+# 기존에 일반 VoiceClient로 연결된 경우 강제 종료 후 새로 연결합니다.
+                if vc and not isinstance(vc, voice_recv.VoiceRecvClient):
+                    try:
+        # force=True로 강제 종료하여 연결이 완전히 끊어지도록 합니다.
+                        await vc.disconnect(force=True)
+                except Exception:
+                    pass
+                vc = None
+
+                if not vc:
+    # 연결되어 있지 않거나 이전 연결을 끊은 경우 새로 VoiceRecvClient로 접속
                     self.vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
                 else:
+    # 이미 VoiceRecvClient로 연결되어 있으면 그대로 사용하고 채널만 이동
                     self.vc = vc
-                    # 다른 채널에 있으면 이동
-                    if self.vc.channel != channel:
+                if self.vc.channel != channel:
                         await self.vc.move_to(channel)
+# 나머지 코드는 그대로 (sink 생성, listen 호출 등)
                 # BasicSink를 생성하고 콜백 등록
                 self.sink = BasicSink(self.bot, self.handle_speech)
                 self.vc.listen(self.sink)
