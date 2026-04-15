@@ -27,10 +27,20 @@ class BasicSink(voice_recv.AudioSink):
         self.is_processing = False
         self.current_user = None
         self.buffer_lock = asyncio.Lock()
+        # Timestamp when the first packet of the current utterance was received.
+        # Used to trigger STT even when there is continuous speech with no silence.
+        self.first_packet_time = 0.0
+        # Maximum duration (in seconds) to wait before forcing STT on the buffered audio.
+        self.MAX_PROCESS_DELAY = 2.0
 
         # 설정값
-        self.SILENCE_THRESHOLD = 1.5  # 1.5초간 조용하면 말이 끝난 것으로 간주
-        self.MIN_BUFFER_SIZE = int(48000 * 2 * 2 * 0.5)  # 최소 0.5초 이상 데이터일 때만 처리
+        # 침묵 감지 임계값(초)
+        # 음성 수신 환경에서 디스코드 패킷이 계속 들어오는 경우 침묵을 포착하기 어려워
+        # STT가 실행되지 않는 문제가 있었으므로 임계값을 0.8초로 낮췄습니다.
+        self.SILENCE_THRESHOLD = 0.8
+        # 최소 버퍼 크기: 약 0.3초 분량의 PCM 데이터(48kHz * 2채널 * 16비트 * 0.3초)
+        # 버퍼가 이 값 이상 모이면 STT를 수행하도록 하여 짧은 발화도 인식할 수 있게 했습니다.
+        self.MIN_BUFFER_SIZE = int(48000 * 2 * 2 * 0.3)
 
     def wants_opus(self) -> bool:
         # PCM(생소리) 데이터를 받습니다.
@@ -59,8 +69,12 @@ class BasicSink(voice_recv.AudioSink):
                 pass
 
             # write는 sync 함수라 직접 await 못 하므로 빠르게 버퍼 추가만 처리
+            now = time.time()
+            # 초기 발화 시각을 기록하여 연속 발화 시에도 일정 시간이 지나면 STT를 강제로 실행할 수 있도록 합니다.
+            if self.first_packet_time == 0.0:
+                self.first_packet_time = now
             self.audio_buffer.extend(pcm)
-            self.last_speaking_time = time.time()
+            self.last_speaking_time = now
             self.current_user = user
 
             # 이미 침묵 체크 중이 아니면 한 번만 실행
@@ -82,24 +96,42 @@ class BasicSink(voice_recv.AudioSink):
                 current_time = time.time()
 
                 # 말 끝났고 버퍼가 충분할 때 처리
-                if (
+                # 두 조건 중 하나 충족 시 STT 실행:
+                # 1) 침묵이 일정 시간 지속되고 버퍼가 충분할 때
+                # 2) 첫 패킷 이후 최대 시간(MAX_PROCESS_DELAY)이 경과하고 버퍼가 충분할 때
+                silence_cond = (
                     current_time - self.last_speaking_time > self.SILENCE_THRESHOLD
                     and len(self.audio_buffer) > self.MIN_BUFFER_SIZE
-                ):
+                )
+                force_cond = (
+                    self.first_packet_time != 0.0
+                    and (current_time - self.first_packet_time > self.MAX_PROCESS_DELAY)
+                    and len(self.audio_buffer) > self.MIN_BUFFER_SIZE
+                )
+                if silence_cond or force_cond:
                     async with self.buffer_lock:
                         audio_to_process = bytes(self.audio_buffer)
                         user = self.current_user
-
                         # 다음 발화를 위해 먼저 초기화
                         self.audio_buffer = bytearray()
                         self.current_user = None
+                        # reset timestamps
+                        self.first_packet_time = 0.0
 
                     # 로그: 침묵 감지 및 STT 시작
                     try:
-                        print(
-                            f"[STT] 침묵 감지됨. 사용자 {getattr(user, 'display_name', '?')}의 음성 변환을 시작합니다.",
-                            flush=True,
-                        )
+                        if silence_cond:
+                            # 침묵으로 인한 트리거
+                            print(
+                                f"[STT] 침묵 감지됨. 사용자 {getattr(user, 'display_name', '?')}의 음성 변환을 시작합니다.",
+                                flush=True,
+                            )
+                        else:
+                            # 시간 초과로 인한 강제 트리거
+                            print(
+                                f"[STT] 최대 대기시간 초과. 사용자 {getattr(user, 'display_name', '?')}의 음성 변환을 시작합니다.",
+                                flush=True,
+                            )
                     except Exception:
                         pass
 
