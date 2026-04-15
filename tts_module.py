@@ -1,7 +1,7 @@
 import requests
 import os
 
-# 슈비님이 주신 정보
+# ElevenLabs API 정보 (필요시 .env로 이동)
 ELEVENLABS_API_KEY = "sk_e5bbe4c60535ec2ca035244927e7e28397ea49e756fdabcf"
 VOICE_ID = "0tX0fDpY5yPAOO00erV7"
 
