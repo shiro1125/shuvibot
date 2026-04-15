@@ -87,6 +87,9 @@ if genai and GEMINI_API_KEY:
     except Exception as e:
         print(f"❌ Gemini 클라이언트 초기화 실패: {e}")
 
+# 명령어를 특정 길드에 바로 등록하려면 TRPG_GUILD_ID 환경 변수를 설정하세요.
+TRPG_GUILD_ID_ENV = os.getenv("TRPG_GUILD_ID")
+
 
 ########## 데이터베이스 헬퍼 함수 ##########
 
@@ -292,15 +295,24 @@ class TRPGCog(commands.Cog):
                 "CHA": 매력 if 매력 is not None else None,
             }
             total = sum(v for v in provided_stats.values() if v is not None)
+            # 스탯 합계가 100을 넘으면 실패 처리
             if total > 100:
                 await interaction.response.send_message(
                     f"❌ 스탯 총합이 100을 초과했습니다. 현재 합계: {total}",
                     ephemeral=True,
                 )
                 return
+            # HP가 입력되었는데 10 미만이면 실패 처리
+            if 체력 is not None and 체력 < 10:
+                await interaction.response.send_message(
+                    f"❌ 체력(HP)은 최소 10 이상이어야 합니다. 입력한 HP: {체력}",
+                    ephemeral=True,
+                )
+                return
             remaining_points = 100 - total
             missing_keys = [k for k, v in provided_stats.items() if v is None]
             stats = provided_stats.copy()
+            # 무작위 배분: 남은 포인트를 임의로 배분하되 마지막 항목에 남은 포인트를 모두 더합니다.
             for i, key in enumerate(missing_keys):
                 if i == len(missing_keys) - 1:
                     stats[key] = remaining_points
@@ -310,6 +322,13 @@ class TRPGCog(commands.Cog):
                     remaining_points -= val
             if remaining_points > 0 and missing_keys:
                 stats[missing_keys[0]] += remaining_points
+            # 최종 HP가 10 미만이면 실패 처리 (자동 분배된 경우)
+            if stats["HP"] < 10:
+                await interaction.response.send_message(
+                    f"❌ 자동으로 분배된 체력(HP)이 {stats['HP']}입니다. HP는 최소 10 이상이어야 합니다. 다른 스탯 분배를 시도하세요.",
+                    ephemeral=True,
+                )
+                return
             # Supabase 저장: user_name을 식별자로 사용
             upsert_character(user_name, guild_id, 이름, 성별, 직업, stats, [], "")
             embed = discord.Embed(title="캐릭터 생성", color=discord.Color.blue())
@@ -456,6 +475,15 @@ async def setup(bot: commands.Bot) -> None:
     try:
         # Cog 등록 후 바로 TRPG 그룹을 명령 트리에 추가합니다. 이렇게 해야 봇의 setup_hook에서 동기화하기 전에 그룹이 등록됩니다.
         bot.tree.add_command(cog.trpg_group)
+        # 특정 길드 ID가 지정된 경우, 그 길드에만 명령어를 명시적으로 등록합니다.
+        if TRPG_GUILD_ID_ENV:
+            try:
+                gid = int(TRPG_GUILD_ID_ENV)
+                guild_obj = discord.Object(id=gid)
+                bot.tree.add_command(cog.trpg_group, guild=guild_obj)
+                print(f"✅ TRPG 명령어 그룹을 길드 {gid}에 등록했습니다.")
+            except Exception as guild_err:
+                print(f"⚠️ TRPG 길드 등록 실패: {guild_err}")
         print("✅ TRPG 명령어 그룹 등록 완료!")
     except Exception as e:
         print(f"⚠️ TRPG 명령어 그룹 등록 실패 또는 이미 등록됨: {e}")
