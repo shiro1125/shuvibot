@@ -170,10 +170,16 @@ async def set_personality(it: discord.Interaction, 설정: str):
     bot.current_personality = 설정
     await it.response.send_message(f"✅ 성격이 **{설정}**으로 변경되었어!")
 
-@bot.tree.command(name="자동입장", description="자동 재접속 기능 On/Off")
-async def toggle_auto_join(it: discord.Interaction, 상태: bool):
-    bot.auto_join_enabled = 상태
-    await it.response.send_message(f"🎙️ 자동 입장 기능이 **{'켜졌어' if 상태 else '꺼졌어'}**!")
+@bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
+@app_commands.choices(상태=[
+    app_commands.Choice(name="켜기 (On)", value="on"),
+    app_commands.Choice(name="끄기 (Off)", value="off")
+])
+async def 자동입장(interaction: discord.Interaction, 상태: str):
+    bot.auto_join_enabled = (상태 == "on")
+    if 상태 == "off" and interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+    await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태 == 'on' else '❌ 자동 입장 비활성화'}")
 
 @bot.tree.command(name="입장", description="음성 채널 호출")
 async def join_vc(it: discord.Interaction):
@@ -221,7 +227,7 @@ async def on_message(message):
                             try: score_val = int(res.text.split("[SCORE:")[1].split("]")[0].replace("+",""))
                             except: pass
                         
-                        # 업데이트 전/후 점수 받아와서 로그 출력
+                        # 업데이트 전/후 점수 받아와서 로그 출력 (이 부분이 정상적으로 실행되어야 로그가 남습니다)
                         old_aff, new_aff = update_user_affinity(uid, uname, score_val)
                         diff = new_aff - old_aff
                         print(f"✅ {uname} 친밀도 업데이트: {old_aff} -> {new_aff} ({'+' if diff >= 0 else ''}{diff})")
