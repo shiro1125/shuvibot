@@ -285,14 +285,15 @@ class ReactionSpeedCog(commands.Cog):
             username=interaction.user.display_name,
         )
 
-        # 메시지 전송 및 메시지 객체 저장
-        message = await interaction.response.send_message(
-            embed=embed, view=view, wait=True
-        )
-        # message는 send_message가 반환하는 Message 객체입니다.
-        # View에 메시지 객체를 등록하여 콜백에서 수정할 수 있게 합니다.
-        if isinstance(message, discord.Message):
+        # 메시지 전송
+        await interaction.response.send_message(embed=embed, view=view)
+        # InteractionResponse.send_message는 메시지를 반환하지 않으므로,
+        # original_response()를 통해 메시지 객체를 가져옵니다.
+        try:
+            message = await interaction.original_response()
             view.set_message(message)
+        except Exception:
+            message = None
 
         # 2~5초 사이 랜덤 대기
         await asyncio.sleep(random.uniform(2.0, 5.0))
