@@ -35,12 +35,11 @@ RANK_1_ROLE_ID = 1493551151323549767
 # Gemini 설정
 client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1beta'})
 MODEL_LIST = [
-    "models/gemini-3.1-pro-preview", 
-    "models/gemini-3-flash-preview", 
-    "models/gemini-2.5-pro", 
-    "models/gemini-2.5-flash", 
-    "models/gemini-2.0-flash", 
-    "models/gemini-flash-latest"
+    "models/gemini-3-flash-preview",
+    "models/gemini-2.5-flash",
+    "models/gemini-3.1-flash-lite-preview",
+    "models/gemini-2.5-flash-lite",
+    "models/gemma-3-27b-it"
 ]
 MODEL_STATUS = {model: {"is_available": True} for model in MODEL_LIST}
 
