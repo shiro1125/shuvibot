@@ -9,17 +9,16 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 테이블 이름 (bot.py 기준)
+# 테이블 이름 (슈비님 DB 기준)
 TABLE_NAME = "user_stats"
 
 def get_user_affinity(user_id, user_name):
-    """bot.py의 로직을 그대로 유지한 친밀도 조회 함수"""
+    """유저의 친밀도를 조회하고, 없으면 생성합니다."""
     try:
         res = supabase.table(TABLE_NAME).select("affinity").eq("user_id", str(user_id)).execute()
         if res.data:
             return res.data[0]['affinity']
         else:
-            # 신규 유저 등록
             supabase.table(TABLE_NAME).insert({
                 "user_id": str(user_id),
                 "user_name": user_name,
@@ -31,8 +30,8 @@ def get_user_affinity(user_id, user_name):
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
-def update_user_affinity(user_id, user_name, amount):
-    """bot.py의 로직을 그대로 유지한 친밀도 업데이트 함수"""
+def update_user_affinity(user_id, user_name, amount, reset=False):
+    """친밀도를 업데이트합니다. reset=True일 경우 해당 점수로 고정합니다."""
     try:
         res = supabase.table(TABLE_NAME).select("affinity, chat_count").eq("user_id", str(user_id)).execute()
         
@@ -43,8 +42,9 @@ def update_user_affinity(user_id, user_name, amount):
             current_affinity = 0
             current_chat_count = 0
 
-        new_affinity = current_affinity + amount
-        new_chat_count = current_chat_count + 1
+        # reset 옵션에 따른 점수 계산
+        new_affinity = amount if reset else current_affinity + amount
+        new_chat_count = current_chat_count + (0 if reset else 1)
 
         supabase.table(TABLE_NAME).upsert({
             "user_id": str(user_id),
@@ -59,7 +59,7 @@ def update_user_affinity(user_id, user_name, amount):
         return 0
 
 def get_attitude_guide(affinity):
-    """bot.py 파일 184~194행에 정의된 기준을 그대로 적용"""
+    """친밀도 점수에 따른 뜌비의 태도 가이드라인"""
     if affinity <= -31:
         return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
     elif -30 <= affinity <= -1:
@@ -72,16 +72,9 @@ def get_attitude_guide(affinity):
         return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
 def get_memory_from_db(user_name):
-    """bot.py에서 임포트 에러가 났던 바로 그 함수입니다!"""
+    """최근 대화 기억 15개를 불러옵니다."""
     try:
-        res = (
-            supabase.table("memory")
-            .select("*")
-            .eq("user_name", user_name)
-            .order("created_at", desc=True)
-            .limit(15)
-            .execute()
-        )
+        res = supabase.table("memory").select("*").eq("user_name", user_name).order("created_at", desc=True).limit(15).execute()
         memory_list = res.data or []
         formatted_memory = ""
         for m in reversed(memory_list):
@@ -92,7 +85,7 @@ def get_memory_from_db(user_name):
         return ""
 
 def save_to_memory(user_name, user_msg, bot_res):
-    """대화 내용을 저장하는 함수"""
+    """대화 내용을 DB에 저장합니다."""
     try:
         supabase.table("memory").insert({
             "user_name": user_name,
@@ -103,26 +96,20 @@ def save_to_memory(user_name, user_msg, bot_res):
         print(f"❌ 기억 저장 에러: {e}")
 
 def get_top_ranker_id():
-    """슈비를 포함하여 1위를 조회합니다."""
+    """슈비님을 포함한 전체 1위 유저의 ID를 가져옵니다."""
     try:
         res = supabase.table(TABLE_NAME).select("user_id").order("affinity", desc=True).limit(1).execute()
         if res.data and len(res.data) > 0:
-            return res.data[0]['user_id']
+            return int(res.data[0]['user_id'])
         return None
     except Exception as e:
         print(f"❌ 1위 조회 에러: {e}")
         return None
 
 def get_affinity_ranking(limit=30):
-    """랭킹 리스트를 가져오는 함수"""
+    """친밀도 상위 리스트를 가져옵니다."""
     try:
-        res = (
-            supabase.table(TABLE_NAME)
-            .select("user_name, affinity, chat_count")
-            .order("affinity", desc=True)
-            .limit(limit)
-            .execute()
-        )
+        res = supabase.table(TABLE_NAME).select("user_name, affinity, chat_count").order("affinity", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"❌ 랭킹 조회 에러: {e}")
