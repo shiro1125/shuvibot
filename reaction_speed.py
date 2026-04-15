@@ -90,8 +90,11 @@ def get_user_best(user_id: int, guild_id: int) -> Optional[int]:
             .eq("guild_id", str(guild_id))
             .execute()
         )
-        data = response.get("data", [])
+        # supabase-python의 실행 결과는 APIResponse 또는 PostgrestResponse 객체입니다.
+        # data 속성에 결과 리스트가 저장되어 있습니다.
+        data = getattr(response, "data", [])
         if data:
+            # 첫 번째 레코드의 best_ms 값을 반환
             return data[0].get("best_ms")  # type: ignore[return-value]
     except Exception as e:
         print(f"❌ Supabase 조회 실패: {e}")
@@ -99,19 +102,41 @@ def get_user_best(user_id: int, guild_id: int) -> Optional[int]:
 
 
 def upsert_user_best(user_id: int, guild_id: int, username: str, ms: int) -> None:
-    """해당 사용자의 최고 기록을 업데이트합니다. 기존 기록보다 우수할 경우에만 덮어씁니다."""
+    """해당 사용자의 최고 기록을 업데이트합니다. 기존 기록보다 우수할 경우에만 덮어씁니다.
+
+    Supabase에서는 `on_conflict` 매개변수를 사용하려면 해당 컬럼에 대한 unique constraint가 있어야 합니다.
+    프로젝트 환경에서 제약조건이 없는 경우를 고려하여 upsert 대신 조회 후 업데이트/삽입 로직을 사용합니다.
+    """
     if not supabase:
         return
     try:
-        supabase.table("reaction_best").upsert(
-            {
-                "user_id": str(user_id),
-                "guild_id": str(guild_id),
-                "username": username,
-                "best_ms": ms,
-            },
-            on_conflict=["user_id", "guild_id"],
-        ).execute()
+        # 먼저 기존 레코드가 있는지 확인합니다.
+        existing = (
+            supabase.table("reaction_best")
+            .select("best_ms")
+            .eq("user_id", str(user_id))
+            .eq("guild_id", str(guild_id))
+            .execute()
+        )
+        existing_data = getattr(existing, "data", [])
+        if existing_data:
+            # 업데이트 수행
+            supabase.table("reaction_best").update(
+                {
+                    "username": username,
+                    "best_ms": ms,
+                }
+            ).eq("user_id", str(user_id)).eq("guild_id", str(guild_id)).execute()
+        else:
+            # 신규 삽입
+            supabase.table("reaction_best").insert(
+                {
+                    "user_id": str(user_id),
+                    "guild_id": str(guild_id),
+                    "username": username,
+                    "best_ms": ms,
+                }
+            ).execute()
     except Exception as e:
         print(f"❌ Supabase upsert 실패: {e}")
 
@@ -125,12 +150,12 @@ def get_ranking(guild_id: int, limit: int = 10) -> List[dict]:
             supabase.table("reaction_best")
             .select("user_id, username, best_ms")
             .eq("guild_id", str(guild_id))
-            # asc=True 는 supabase-py에서 지원하지 않으므로 desc=False로 지정합니다.
             .order("best_ms", desc=False)
             .limit(limit)
             .execute()
         )
-        return response.get("data", [])  # type: ignore[return-value]
+        data = getattr(response, "data", [])
+        return data  # type: ignore[return-value]
     except Exception as e:
         print(f"❌ Supabase 랭킹 조회 실패: {e}")
         return []
@@ -148,7 +173,7 @@ def get_user_ranking(user_id: int, guild_id: int) -> Optional[int]:
             .order("best_ms", desc=False)
             .execute()
         )
-        data = response.get("data", [])
+        data = getattr(response, "data", [])
         for index, row in enumerate(data, start=1):
             if row.get("user_id") == str(user_id):
                 return index
