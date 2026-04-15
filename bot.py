@@ -3,190 +3,202 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 import os
+from datetime import datetime
+import pytz
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
 from google import genai
 
-# 외부 모듈 임포트 (기능 분리)
+# 외부 로직 임포트
 from personality import make_system_instruction
 from affinity_manager import (
     get_user_affinity, update_user_affinity, get_attitude_guide, 
-    get_memory_from_db, save_to_memory, get_top_ranker_id
+    get_memory_from_db, save_to_memory, get_top_ranker_id, get_affinity_ranking
 )
-from scheduler import setup_scheduler, RANK_1_ROLE_ID, GUILD_ID_1
 
-# 환경 변수 로드
+# 설정 및 ID
+korea = pytz.timezone('Asia/Seoul')
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-SHUVI_USER_ID = 440517859140173835
 
-# Gemini API 설정
+GUILD_ID_1 = 1228372760212930652
+GUILD_ID_2 = 1170313139225640972
+STUDY_CHANNEL_ID = 1358176930725236968
+WORK_CHANNEL_ID = 1296431232045027369
+ANNOUNCEMENT_CHANNEL_ID = 1358394433665634454
+SHUVI_USER_ID = 440517859140173835
+RANK_1_ROLE_ID = 1493551151323549767
+
+# Gemini 설정
 client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1beta'})
 MODEL_LIST = [
     "models/gemini-3-flash-preview", 
     "models/gemini-2.5-flash", 
-    "models/gemini-3.1-flash-lite-preview"
+    "models/gemini-3.1-flash-lite-preview",
+    "models/gemini-2.5-flash-lite",
+    "models/gemma-3-27b-it"
 ]
 MODEL_STATUS = {model: {"is_available": True} for model in MODEL_LIST}
 
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        intents.members = True
-        intents.message_content = True
-        intents.voice_states = True
+        intents.members, intents.message_content, intents.voice_states = True, True, True
         super().__init__(command_prefix='!', intents=intents)
-        
         self.auto_join_enabled = True
         self.is_processing = False
         self.current_personality = "기본"
         self.active_model = "대기 중"
 
     async def setup_hook(self):
-        # 1. 외부 기능(블랙잭, TTS) 로드
+        # 외부 확장 로드 (블랙잭, TTS 등)
         for ext in ['tts', 'blackjack']:
             try:
                 await self.load_extension(ext)
-                print(f"✅ {ext} 확장 로드 완료!")
+                print(f"✅ {ext} 로드 완료")
             except Exception as e:
                 print(f"❌ {ext} 로드 실패: {e}")
         
-        # 2. 스케줄러(스터디 관리, 수업 알림) 등록 및 시작
-        self.study_loop, self.notif_loop = setup_scheduler(self)
-        self.study_loop.start()
-        self.notif_loop.start()
-        
-        # 3. 랭킹 체크 루프 시작
+        # 루프 시작
+        self.main_loop.start()
         self.rank_update_loop.start()
-        
         await self.tree.sync()
-        print("✅ 모든 명령어 및 루프 동기화 완료!")
+        print("✅ 시스템 동기화 완료")
+
+    @tasks.loop(minutes=1)
+    async def main_loop(self):
+        now = datetime.now(korea)
+        guild1 = self.get_guild(GUILD_ID_1)
+        guild2 = self.get_guild(GUILD_ID_2)
+
+        # 1. 모델 한도 초기화 (오후 4시)
+        if now.hour == 16 and now.minute == 0:
+            for m in MODEL_STATUS: MODEL_STATUS[m]["is_available"] = True
+
+        # 2. 스터디 채널 관리 (18:00~23:00)
+        if guild1:
+            study_ch = guild1.get_channel(STUDY_CHANNEL_ID)
+            if study_ch:
+                study_role = discord.utils.get(guild1.roles, name="스터디")
+                is_time = 18 <= now.hour <= 23
+                await study_ch.set_permissions(guild1.default_role, connect=False)
+                await study_ch.set_permissions(study_role, connect=is_time)
+                name = "🟢 스터디" if is_time else "🔴 스터디"
+                if study_ch.name != name: await study_ch.edit(name=name)
+            
+            # 3. 자동 입장 (워크 채널)
+            if self.auto_join_enabled:
+                work_ch = guild1.get_channel(WORK_CHANNEL_ID)
+                if work_ch and (not guild1.voice_client or not guild1.voice_client.is_connected()):
+                    try: await work_ch.connect(reconnect=True, timeout=20)
+                    except: pass
+
+        # 4. 수업 알림 (토요일 17:50)
+        if now.weekday() == 5 and now.hour == 17 and now.minute == 50 and guild2:
+            ann_ch = guild2.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+            role = discord.utils.get(guild2.roles, name="수강생")
+            week = (now.day - 1) // 7 + 1
+            if ann_ch and role:
+                msg = "이번주는 휴강입니다." if week == 5 else f"{role.mention} 📢 수업 10분전 입니다!"
+                await ann_ch.send(msg)
 
     @tasks.loop(hours=1)
     async def rank_update_loop(self):
-        """실시간 친밀도 1위 역할 부여 로직"""
         guild = self.get_guild(GUILD_ID_1)
-        if not guild: return
-        
         top_id = get_top_ranker_id()
-        role = guild.get_role(RANK_1_ROLE_ID)
+        role = guild.get_role(RANK_1_ROLE_ID) if guild else None
         if role and top_id:
-            # 현재 역할을 가진 사람과 1위가 다를 경우에만 갱신
-            if role.members and role.members[0].id == top_id:
-                return
-            for member in role.members:
-                await member.remove_roles(role)
+            if role.members and role.members[0].id == top_id: return
+            for m in role.members: await m.remove_roles(role)
             winner = guild.get_member(top_id)
-            if winner:
-                await winner.add_roles(role)
+            if winner: await winner.add_roles(role)
 
 bot = MyBot()
 
-# --- 메시지 이벤트 (뜌비 대화 엔진) ---
+# --- 명령어: 모델 관리 ---
+@bot.tree.command(name="모델", description="현재 사용 중인 AI 모델 상태를 확인합니다.")
+async def model_info(it: discord.Interaction):
+    msg = f"🤖 **뜌비 상태 보고**\n- 현재 성격: `{bot.current_personality}`\n- 활성 모델: `{bot.active_model}`\n\n**모델 가동 현황:**\n"
+    for m, s in MODEL_STATUS.items():
+        status = "✅ 가동 가능" if s["is_available"] else "❌ 한도 초과"
+        msg += f"- `{m}`: {status}\n"
+    await it.response.send_message(msg)
 
+# --- 명령어: 친밀도 그룹 ---
+친밀도 = app_commands.Group(name="친밀도", description="친밀도 관리")
+
+@친밀도.command(name="확인", description="친밀도 확인")
+async def aff_check(it: discord.Interaction, 유저: discord.Member = None):
+    target = 유저 or it.user
+    score = get_user_affinity(target.id, target.display_name)
+    await it.response.send_message(f"📊 **{target.display_name}**님과의 친밀도: `{score}점`")
+
+@친밀도.command(name="랭킹", description="TOP 30 랭킹")
+async def aff_rank(it: discord.Interaction):
+    data = get_affinity_ranking(30)
+    msg = "🏆 **친밀도 TOP 30**\n" + "\n".join([f"{i+1}위: {r['display_name']} ({r['affinity_score']}점)" for i, r in enumerate(data)])
+    await it.response.send_message(msg or "데이터가 없어!")
+
+@친밀도.command(name="설정", description="친밀도 강제 설정 (슈비 전용)")
+async def aff_set(it: discord.Interaction, 유저: discord.Member, 점수: int):
+    if it.user.id != SHUVI_USER_ID: return await it.response.send_message("권한이 없어!", ephemeral=True)
+    update_user_affinity(유저.id, 유저.display_name, 점수, reset=True)
+    await it.response.send_message(f"✅ {유저.display_name}님의 점수를 {점수}로 설정했어.")
+
+bot.tree.add_command(친밀도)
+
+# --- 명령어: 설정 ---
+@bot.tree.command(name="성격", description="뜌비 성격 변경")
+@app_commands.choices(설정=[app_commands.Choice(name=x, value=x) for x in ["기본", "메스가키", "츤데레", "얀데레"]])
+async def set_p(it: discord.Interaction, 설정: app_commands.Choice[str]):
+    if it.user.id != SHUVI_USER_ID: return await it.response.send_message("엄마만 가능!", ephemeral=True)
+    bot.current_personality = 설정.value
+    await it.response.send_message(f"✅ 성격이 **{설정.value}**로 변경되었어!")
+
+@bot.tree.command(name="자동입장", description="자동입장 On/Off")
+@app_commands.choices(상태=[app_commands.Choice(name="ON", value="on"), app_commands.Choice(name="OFF", value="off")])
+async def set_aj(it: discord.Interaction, 상태: str):
+    bot.auto_join_enabled = (상태 == "on")
+    await it.response.send_message(f"🎙️ 자동입장: {상태.upper()}")
+
+# --- 메시지 이벤트 ---
 @bot.event
 async def on_message(message):
     if message.author.bot: return
-    
-    # 뜌비 언급 또는 키워드 포함 시 대화 시작
     if bot.user.mentioned_in(message) or "뜌비" in message.content:
         if bot.is_processing: return
         bot.is_processing = True
-        
         async with message.channel.typing():
             uid, uname = message.author.id, message.author.display_name
-            is_shuvi = (uid == SHUVI_USER_ID)
-            
-            # 사용자 데이터 로드
-            affinity = get_user_affinity(uid, uname)
-            attitude = get_attitude_guide(affinity)
-            sys_inst = make_system_instruction(is_shuvi, uname, bot.current_personality, attitude)
+            aff = get_user_affinity(uid, uname)
+            sys_inst = make_system_instruction(uid == SHUVI_USER_ID, uname, bot.current_personality, get_attitude_guide(aff))
             history = get_memory_from_db(uname) if bot.current_personality == "기본" else ""
             
-            content = f"과거 대화:\n{history}\n\n유저 메시지: {message.content}" if history else message.content
-
             success = False
             for m_name in [m for m in MODEL_LIST if MODEL_STATUS[m]["is_available"]]:
                 try:
                     bot.active_model = m_name
-                    # Gemma 모델 대응용 설정 (필요 시)
-                    cfg = {} if "gemma" in m_name.lower() else {'system_instruction': sys_inst}
-                    prompt = f"[지침]\n{sys_inst}\n\n{content}" if "gemma" in m_name.lower() else content
-                    
-                    res = await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: client.models.generate_content(model=m_name, contents=prompt, config=cfg)
-                    )
-                    
+                    res = await asyncio.get_running_loop().run_in_executor(None, lambda: client.models.generate_content(model=m_name, contents=f"{sys_inst}\n기억: {history}\n말: {message.content}"))
                     if res and res.text:
-                        # 점수 태그 제거 후 답변
-                        reply_text = res.text.split("[SCORE:")[0].strip()
-                        await message.reply(reply_text)
-                        
-                        # 점수 추출 및 친밀도 업데이트
+                        reply = res.text.split("[SCORE:")[0].strip()
+                        await message.reply(reply)
                         if "[SCORE:" in res.text:
-                            try:
-                                score = int(res.text.split("[SCORE:")[1].split("]")[0].replace("+",""))
-                                update_user_affinity(uid, uname, score)
+                            try: update_user_affinity(uid, uname, int(res.text.split("[SCORE:")[1].split("]")[0].replace("+","")))
                             except: pass
-                        
-                        if bot.current_personality == "기본":
-                            save_to_memory(uname, message.content, reply_text)
-                        success = True
-                        break
+                        if bot.current_personality == "기본": save_to_memory(uname, message.content, reply)
+                        success = True; break
                 except Exception as e:
-                    if any(x in str(e).upper() for x in ["429", "QUOTA"]):
-                        MODEL_STATUS[m_name]["is_available"] = False
+                    if any(x in str(e).upper() for x in ["429", "QUOTA"]): MODEL_STATUS[m_name]["is_available"] = False
                     continue
-            
-            if not success:
-                await message.reply("뜌비 지금 너무 졸려... 나중에 다시 불러줘! 😭")
-        
+            if not success: await message.reply("뜌비 지금 너무 졸려... 😭")
         bot.is_processing = False
-    
     await bot.process_commands(message)
 
-# --- 슬래시 명령어 세트 ---
-
-@bot.tree.command(name="성격", description="뜌비의 성격을 바꿉니다.")
-@app_commands.choices(설정=[
-    app_commands.Choice(name="기본", value="기본"),
-    app_commands.Choice(name="메스가키", value="메스가키"),
-    app_commands.Choice(name="츤데레", value="츤데레"),
-    app_commands.Choice(name="얀데레", value="얀데레")
-])
-async def set_personality(it: discord.Interaction, 설정: app_commands.Choice[str]):
-    if it.user.id != SHUVI_USER_ID:
-        return await it.response.send_message("창조주 슈비님만 내 성격을 바꿀 수 있어!", ephemeral=True)
-    bot.current_personality = 설정.value
-    await it.response.send_message(f"✅ 뜌비의 성격이 **{설정.value}**(으)로 변경되었어!")
-
-@bot.tree.command(name="내정보", description="나의 친밀도와 뜌비와의 관계를 확인합니다.")
-async def my_info(it: discord.Interaction):
-    aff = get_user_affinity(it.user.id, it.user.display_name)
-    await it.response.send_message(f"📊 **{it.user.display_name}**님과 나의 친밀도는 **{aff}점**이야!")
-
-@bot.tree.command(name="자동입장", description="보이스 채널 자동 입장 기능을 설정합니다.")
-@app_commands.choices(상태=[
-    app_commands.Choice(name="켜기", value="on"),
-    app_commands.Choice(name="끄기", value="off")
-])
-async def set_auto_join(it: discord.Interaction, 상태: str):
-    if it.user.id != SHUVI_USER_ID:
-        return await it.response.send_message("엄마만 설정할 수 있어!", ephemeral=True)
-    bot.auto_join_enabled = (상태 == "on")
-    await it.response.send_message(f"🎙️ 자동 입장 기능이 **{상태.upper()}** 되었어!")
-
-@bot.event
-async def on_ready():
-    print(f"✅ 로그인 성공: {bot.user}")
-
-# --- 웹 서버 (Koyeb 유지용) ---
 app = Flask(__name__)
 @app.route('/')
-def health_check(): return "OK", 200
-
+def h(): return "OK", 200
 if __name__ == '__main__':
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}, daemon=True).start()
     bot.run(TOKEN)
