@@ -7,7 +7,7 @@ import os
 class TTS(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 슈비님이 발급받은 정보 (보안을 위해 이곳에 직접 넣거나 .env를 쓰세요)
+        # 슈비님이 발급받은 정보 (보안을 위해 환경변수로 옮길 수 있습니다)
         self.api_key = "sk_e5bbe4c60535ec2ca035244927e7e28397ea49e756fdabcf"
         self.voice_id = "0tX0fDpY5yPAOO00erV7"
 
@@ -22,7 +22,7 @@ class TTS(commands.Cog):
         filename = f"voice_{interaction.user.id}.mp3"
 
         try:
-            # 1. ElevenLabs API 호출 부분 (교체됨)
+            # 1. ElevenLabs API 호출 부분
             url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
             headers = {
                 "xi-api-key": self.api_key,
@@ -45,7 +45,7 @@ class TTS(commands.Cog):
             else:
                 raise Exception(f"API 오류 (상태 코드: {response.status_code})")
 
-            # 2. 음성 채널 접속 및 재생 (기존 로직 유지)
+            # 2. 음성 채널 접속 및 재생
             vc = interaction.guild.voice_client
             if not vc:
                 vc = await channel.connect()
@@ -55,9 +55,7 @@ class TTS(commands.Cog):
             if vc.is_playing():
                 vc.stop()
 
-            # ffmpeg 설정은 그대로 유지하되, Koyeb 환경에 맞춰 executable 경로는 기본값 사용
             source = discord.FFmpegPCMAudio(filename)
-            
             vc.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
             await interaction.followup.send(f"🎤 **뜌비:** {텍스트}")
 
