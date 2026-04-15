@@ -188,6 +188,23 @@ def update_character_state(user_name: str, guild_id: int, new_state: str) -> Non
         print(f"❌ Supabase 상태 업데이트 실패: {e}")
 
 
+def update_character_fields(user_name: str, guild_id: int, fields: Dict[str, any]) -> None:
+    """
+    캐릭터의 여러 필드를 한 번에 업데이트합니다. 전달된 딕셔너리의 키와 값을 Supabase에 저장합니다.
+
+    Args:
+        user_name: Discord 닉네임을 기준으로 캐릭터를 조회합니다.
+        guild_id: 길드 ID
+        fields: 업데이트할 컬럼과 값의 딕셔너리
+    """
+    if not supabase:
+        return
+    try:
+        supabase.table("trpg_characters").update(fields).eq("user_name", user_name).eq("guild_id", str(guild_id)).execute()
+    except Exception as e:
+        print(f"❌ Supabase 필드 업데이트 실패: {e}")
+
+
 ########## 게임 로직 함수 ##########
 
 def is_action_allowed(action: str) -> bool:
@@ -202,6 +219,13 @@ def is_action_allowed(action: str) -> bool:
         "무적",
         "불멸",
         "무한",
+        "용을 타",
+        "하늘로 날아",
+        "왕국 전체",
+        "지배",
+        "승리한다",
+        "세계 정복",
+        "전지전능",
     ]
     lowered = action.lower().replace(" ", "")
     for word in banned_keywords:
@@ -220,16 +244,21 @@ def classify_action(action: str) -> Tuple[str, int]:
     stat_key = "INT"
     difficulty = random.randint(10, 18)
     text = action.lower()
-    if any(kw in text for kw in ["유혹", "매혹", "설득", "친해지", "미인"]):
+    # 판정 스탯을 키워드 기반으로 결정합니다.
+    # 우선 순위는 유혹/설득/협상 → 힘/공격 → 민첩/은신 → 체력/저항 → 지능/분석입니다.
+    if any(kw in text for kw in ["유혹", "매혹", "설득", "친해지", "미인", "협상", "호감", "친목", "이끌"]):
         stat_key = "CHA"
         difficulty = random.randint(8, 16)
-    elif any(kw in text for kw in ["공격", "부수", "때리", "베기", "찌르"]):
+    elif any(kw in text for kw in ["공격", "부수", "때리", "베기", "찌르", "밀치", "잡아", "힘", "싸운다"]):
         stat_key = "STR"
         difficulty = random.randint(10, 18)
-    elif any(kw in text for kw in ["은신", "몰래", "도둑", "숨", "피하", "회피"]):
+    elif any(kw in text for kw in ["은신", "몰래", "도둑", "숨", "피하", "회피", "도망", "뛰어", "도약", "날렵", "재빠"]):
         stat_key = "DEX"
         difficulty = random.randint(10, 18)
-    elif any(kw in text for kw in ["분석", "조사", "연구", "지식", "파악"]):
+    elif any(kw in text for kw in ["버티", "저항", "체력", "독", "부상", "피로", "견딘다"]):
+        stat_key = "HP"
+        difficulty = random.randint(10, 18)
+    elif any(kw in text for kw in ["분석", "조사", "연구", "지식", "파악", "마법", "감정", "추리", "해석"]):
         stat_key = "INT"
         difficulty = random.randint(10, 18)
     else:
@@ -329,6 +358,15 @@ class TRPGCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
+            # 이미 캐릭터가 존재하는지 확인
+            existing_character = get_character(user_name, guild_id)
+            if existing_character:
+                # 캐릭터가 이미 존재하는 경우 생성하지 않고 안내 메시지 출력
+                embed_exist = discord.Embed(title="캐릭터 생성 실패", color=discord.Color.red())
+                embed_exist.add_field(name="안내", value="이미 캐릭터가 존재합니다. 새로 생성하려면 기존 캐릭터를 삭제해야 합니다.", inline=False)
+                embed_exist.add_field(name="현재 캐릭터", value=f"이름: {existing_character['name']}, 직업: {existing_character['job']}", inline=False)
+                await interaction.response.send_message(embed=embed_exist, ephemeral=True)
+                return
             # Supabase 저장: user_name을 식별자로 사용
             upsert_character(user_name, guild_id, 이름, 성별, 직업, stats, [], "")
             embed = discord.Embed(title="캐릭터 생성", color=discord.Color.blue())
@@ -401,23 +439,112 @@ class TRPGCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
+            # 사용자가 입력한 문자열을 검사하여 숫자 선택지를 처리하고, 상황과 맞지 않는 행동을 차단합니다.
+            raw_input = 내용.strip()
+            import re
+            option_matches = re.findall(r"(\d+)\.\s*([^\n]+)", current_state)
+            if option_matches:
+                # 현재 상황에 선택지가 있는 경우
+                # 사용자 입력이 숫자면 해당 번호의 선택지를 가져옵니다.
+                if raw_input.isdigit():
+                    choice_index = int(raw_input) - 1
+                    # option_matches는 (number, text) 튜플 목록입니다.
+                    # 번호에 정확히 일치하는 항목을 찾습니다.
+                    selected_option = None
+                    for num_str, opt_text in option_matches:
+                        if int(num_str) - 1 == choice_index:
+                            selected_option = opt_text.strip()
+                            break
+                    if selected_option:
+                        내용 = selected_option
+                    else:
+                        # 숫자 입력이 범위를 벗어난 경우 오류 메시지를 출력합니다.
+                        await interaction.response.send_message(
+                            f"❌ 번호 {raw_input}은 선택지에 없습니다. 올바른 번호를 입력하세요.",
+                            ephemeral=True,
+                        )
+                        return
+                else:
+                    # 숫자가 아닌 입력인 경우, 입력이 선택지 중 하나와 일치하는지 확인합니다.
+                    # 선택지 목록의 텍스트를 소문자로 비교합니다.
+                    lower_options = [opt_text.lower().strip() for _, opt_text in option_matches]
+                    if raw_input.lower() not in lower_options:
+                        # 사용자가 제시된 옵션과 다른 행동을 입력하면 현재 상황에 맞지 않는다고 간주합니다.
+                        # 이 경우 다시 입력을 유도합니다.
+                        await interaction.response.send_message(
+                            "❌ 현재 상황에는 해당 행동을 수행할 수 없습니다. 제시된 선택지 번호를 입력하거나, 선택지 내용과 일치하는 행동을 입력하세요.",
+                            ephemeral=True,
+                        )
+                        return
+                    # 입력이 옵션과 일치하면 그대로 사용합니다.
+                    내용 = raw_input
+
+            # 행동 허용 여부 확인 (전역 금지 키워드)
             if not is_action_allowed(내용):
                 await interaction.response.send_message(
                     "❌ 해당 행동은 시스템 규칙에 의해 허용되지 않습니다. 다른 행동을 시도해 주세요.",
                     ephemeral=True,
                 )
                 return
+            # 행동을 분석하여 사용할 스탯과 난이도를 결정합니다.
             stat_key, difficulty = classify_action(내용)
             stat_value = int(character["stats"].get(stat_key, 0))
             natural, total, outcome = roll_dice(stat_value)
+            # pending 상태를 success/failure로 변환합니다.
             if outcome == "pending":
                 outcome = "success" if total >= difficulty else "failure"
+
+            # HP 변화 및 스탯 변화를 추적하기 위한 변수
             hp_change = 0
+            stat_delta = 0
+            inventory_changes: List[str] = []
+
+            # 실패 시 HP 감소: STR 판정 실패일 때만 HP 감소 적용
             if stat_key == "STR" and outcome in ("failure", "critical_failure"):
                 hp_change = -random.randint(1, 5)
                 new_hp = max(0, int(character["hp"]) + hp_change)
-                # HP 업데이트 시 닉네임을 사용합니다.
                 update_character_hp(user_name, guild_id, new_hp)
+
+            # 스탯 변화 로직: 성공 시 스탯 증가, 실패 시 감소 (HP는 제외)
+            if stat_key in ("STR", "DEX", "INT", "CHA"):
+                if outcome in ("critical_success", "success"):
+                    stat_delta = random.choice([1, 2])
+                elif outcome in ("critical_failure", "failure"):
+                    stat_delta = -1
+                # 적용 후 음수 방지
+                new_stat_value = max(0, int(character["stats"][stat_key]) + stat_delta)
+                if new_stat_value != character["stats"][stat_key]:
+                    # Supabase에 업데이트할 필드를 모읍니다.
+                    updated_stats = character["stats"].copy()
+                    updated_stats[stat_key] = new_stat_value
+                    update_character_fields(user_name, guild_id, {"stats": updated_stats})
+                    # 로컬 데이터도 갱신하여 다음 계산에 반영
+                    character["stats"][stat_key] = new_stat_value
+
+            # 랜덤 이벤트: 성공 시 아이템 획득, 실패 시 디버프 효과
+            if outcome in ("critical_success", "success"):
+                # 성공하면 확률적으로 아이템을 획득
+                if random.random() < 0.5:
+                    possible_items = ["금화", "신비한 열쇠", "마법 두루마리", "치유 물약"]
+                    new_item = random.choice(possible_items)
+                    # 인벤토리에 추가
+                    inventory = character.get("inventory") or []
+                    inventory.append(new_item)
+                    inventory_changes.append(f"{new_item} 획득")
+                    update_character_fields(user_name, guild_id, {"inventory": inventory})
+                    character["inventory"] = inventory
+            elif outcome in ("critical_failure", "failure"):
+                # 실패하면 체력 외에도 랜덤한 스탯 감소 효과를 추가로 적용할 수 있습니다.
+                if stat_key != "HP" and random.random() < 0.3:
+                    debuff_stat = stat_key
+                    debuff_amount = random.choice([1, 2])
+                    new_val = max(0, character["stats"][debuff_stat] - debuff_amount)
+                    updated_stats = character["stats"].copy()
+                    updated_stats[debuff_stat] = new_val
+                    update_character_fields(user_name, guild_id, {"stats": updated_stats})
+                    character["stats"][debuff_stat] = new_val
+                    inventory_changes.append(f"{debuff_stat} {debuff_amount} 감소")
+
             # 상황 설명 생성: Gemini API 사용 시도
             narrative = ""
             if gemini_client:
@@ -443,12 +570,13 @@ class TRPGCog(commands.Cog):
             # Gemini가 실패하거나 빈 문자열을 반환한 경우, fallback 스토리 생성
             if not narrative:
                 # 스토리 템플릿: 이전 상황과 행동/결과를 이어주는 서술 생성
-                result_desc = {
+                result_desc_map = {
                     "critical_success": "압도적인 성공을 거두어",
                     "success": "성공적으로",
                     "failure": "실패하여",
                     "critical_failure": "끔찍하게 실패하여",
-                }[outcome]
+                }
+                result_desc = result_desc_map[outcome]
                 # 판타지 배경의 다음 이벤트 후보
                 events = [
                     "당신 앞에 두 갈래 길이 나타납니다.",
@@ -457,10 +585,22 @@ class TRPGCog(commands.Cog):
                     "작은 마법 상자가 눈에 띕니다.",
                     "숲 속에서 신비한 빛이 반짝입니다.",
                     "근처에 모험가 길드의 깃발이 보입니다.",
+                    "폐허가 된 마을에서 희미한 비명의 울림이 들립니다.",
+                    "고대 유적의 입구가 모습을 드러냅니다.",
                 ]
                 next_event = random.choice(events)
+                # 아이템/능력 변화 설명 추가
+                effect_desc = ""
+                if inventory_changes:
+                    effect_desc = " " + ", ".join(inventory_changes) + "를 획득했습니다."
+                elif hp_change < 0:
+                    effect_desc = f" HP가 {abs(hp_change)}만큼 감소했습니다."
+                elif stat_delta > 0:
+                    effect_desc = f" {stat_key} 능력이 {stat_delta} 증가했습니다."
+                elif stat_delta < 0:
+                    effect_desc = f" {stat_key} 능력이 {abs(stat_delta)} 감소했습니다."
                 narrative = (
-                    f"이전 상황에서 당신은 '{내용}' 행동을 시도했고 {result_desc} 결과를 얻었습니다. "
+                    f"이전 상황에서 당신은 '{내용}' 행동을 시도했고 {result_desc} 결과를 얻었습니다.{effect_desc} "
                     f"{next_event} 다음 행동을 결정해야 합니다."
                 )
             # 새 상황을 업데이트합니다. 닉네임 기준으로 저장합니다.
@@ -472,15 +612,20 @@ class TRPGCog(commands.Cog):
             embed.add_field(name="주사위 (1d20)", value=str(natural), inline=True)
             embed.add_field(name="총합", value=str(total), inline=True)
             embed.add_field(name="난이도", value=str(difficulty), inline=True)
-            result_text = {
+            result_text_map = {
                 "critical_success": "대성공!",
                 "success": "성공",
                 "failure": "실패",
                 "critical_failure": "대실패",
-            }[outcome]
-            embed.add_field(name="결과", value=result_text, inline=False)
-            if hp_change < 0:
-                embed.add_field(name="HP 감소", value=f"{abs(hp_change)} 감소", inline=False)
+            }
+            embed.add_field(name="결과", value=result_text_map[outcome], inline=False)
+            # HP 변화 및 스탯 변화 표시
+            if hp_change != 0:
+                embed.add_field(name="HP 변화", value=f"{hp_change:+d}", inline=False)
+            if stat_delta != 0:
+                embed.add_field(name=f"{stat_key} 변화", value=f"{stat_delta:+d}", inline=False)
+            if inventory_changes:
+                embed.add_field(name="아이템 변화", value="\n".join(inventory_changes), inline=False)
             embed.add_field(name="새로운 상황", value=narrative[:1024], inline=False)
             await interaction.response.send_message(embed=embed)
 
