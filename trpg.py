@@ -208,10 +208,13 @@ def update_character_fields(user_name: str, guild_id: int, fields: Dict[str, any
 ########## 게임 로직 함수 ##########
 
 def is_action_allowed(action: str) -> bool:
-    """허용되지 않는 키워드가 포함되어 있는지 확인합니다."""
+    """허용되지 않는 키워드 또는 치트성 입력이 포함되어 있는지 확인합니다.
+
+    사용자가 시스템을 우회하려는 문구(9999, 무조건, 무한 등)나 신적 존재가 되는 내용, 전체를 지배하는 내용 등을 차단합니다.
+    """
     banned_keywords = [
         "신이 된다",
-        "모든",
+        "모든",  # 모든 적 즉사 등
         "즉사",
         "죽인다",
         "모두 죽",
@@ -226,6 +229,12 @@ def is_action_allowed(action: str) -> bool:
         "승리한다",
         "세계 정복",
         "전지전능",
+        "무조건",
+        "9999",
+        "힘스탯 9999",
+        "모든 적을 즉사",
+        "돈을 무한",  # 무한 돈
+        "무조건 성공",
     ]
     lowered = action.lower().replace(" ", "")
     for word in banned_keywords:
@@ -265,6 +274,69 @@ def classify_action(action: str) -> Tuple[str, int]:
         stat_key = "INT"
         difficulty = random.randint(12, 20)
     return stat_key, difficulty
+
+
+# AI를 활용하여 적절한 스탯과 난이도를 결정합니다.
+def determine_stat_and_difficulty(character: Dict[str, any], current_state: str, action: str) -> Tuple[str, int]:
+    """현재 상황과 행동을 기반으로 스탯과 난이도를 AI 또는 휴리스틱으로 결정합니다.
+
+    Gemini를 사용해 stat과 difficulty를 판단하려 시도한 뒤, 실패하거나 적절한 값이 없으면 classify_action 함수와 위험도 휴리스틱을 사용합니다.
+
+    Args:
+        character: 캐릭터 정보 딕셔너리
+        current_state: 현재 상황 설명 문자열
+        action: 사용자가 입력한 행동
+
+    Returns:
+        (stat_key, difficulty)
+    """
+    # 우선 Gemini를 호출하여 stat과 난이도를 판단하도록 시도
+    if gemini_client:
+        try:
+            prompt = (
+                "당신은 판타지 TRPG의 게임마스터로서, 현재 상황과 캐릭터의 행동을 고려하여 판정에 사용할 능력치와 난이도를 판단합니다.\n"
+                "가능한 능력치는 STR(힘), DEX(민첩), INT(지능), CHA(매력), HP(체력) 중 하나입니다.\n"
+                "난이도는 5에서 20 사이의 정수이며, 쉬운 행동일수록 낮고 위험하거나 어려운 행동일수록 높습니다.\n"
+                "응답은 JSON 형식 문자열로 반환하세요. 예: {\"stat\": \"STR\", \"difficulty\": 12}. 다른 설명은 포함하지 마세요.\n\n"
+                f"현재 상황: {current_state}\n"
+                f"행동: {action}\n"
+                f"캐릭터 스탯: STR={character['stats']['STR']}, DEX={character['stats']['DEX']}, INT={character['stats']['INT']}, HP={character['hp']}, CHA={character['stats']['CHA']}"
+            )
+            resp = gemini_client.models.generate_content(
+                model="models/gemini-2.5-flash-lite", contents=prompt
+            )
+            result_text = resp.text if hasattr(resp, "text") else ""
+            import json as _json
+            # JSON 파싱 시도가 실패하면 예외 처리로 넘어갑니다.
+            parsed = _json.loads(result_text)
+            stat_candidate = parsed.get("stat")
+            diff_candidate = parsed.get("difficulty")
+            if (stat_candidate in ("STR", "DEX", "INT", "CHA", "HP") and isinstance(diff_candidate, int) and 5 <= diff_candidate <= 20):
+                return stat_candidate, diff_candidate
+        except Exception:
+            pass
+    # Gemini 결과가 없거나 실패한 경우 휴리스틱 적용
+    # 기본 stat과 난이도는 classify_action으로 결정하지만, 위험 단어에 따라 난이도 조절
+    stat_key, base_difficulty = classify_action(action)
+    # 위험한 단어 목록: 난이도를 높입니다.
+    dangerous_keywords = ["몬스터", "전투", "살상", "화염", "독", "저주", "왕", "유적", "던전", "마법"]
+    # 쉬운 단어 목록: 난이도를 낮춥니다.
+    easy_keywords = ["열기", "줍", "걷", "살핀다", "본다", "듣", "가볍"]
+    action_lower = action.lower()
+    # 위험 단어 발견 시 난이도 상승
+    for kw in dangerous_keywords:
+        if kw in action_lower:
+            base_difficulty = min(20, base_difficulty + random.randint(2, 4))
+            break
+    # 쉬운 단어 발견 시 난이도 하락
+    for kw in easy_keywords:
+        if kw in action_lower:
+            base_difficulty = max(5, base_difficulty - random.randint(2, 4))
+            break
+    # HP 관련 행위는 HP 스탯을 사용하도록 조정
+    if any(kw in action_lower for kw in ["버티", "저항", "체력", "독", "피로"]):
+        stat_key = "HP"
+    return stat_key, base_difficulty
 
 
 def roll_dice(stat_value: int) -> Tuple[int, int, str]:
@@ -486,8 +558,8 @@ class TRPGCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
-            # 행동을 분석하여 사용할 스탯과 난이도를 결정합니다.
-            stat_key, difficulty = classify_action(내용)
+            # AI 혹은 휴리스틱을 이용하여 사용할 스탯과 난이도를 결정합니다.
+            stat_key, difficulty = determine_stat_and_difficulty(character, current_state, 내용)
             stat_value = int(character["stats"].get(stat_key, 0))
             natural, total, outcome = roll_dice(stat_value)
             # pending 상태를 success/failure로 변환합니다.
