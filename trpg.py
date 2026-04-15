@@ -418,6 +418,7 @@ class TRPGCog(commands.Cog):
                 new_hp = max(0, int(character["hp"]) + hp_change)
                 # HP 업데이트 시 닉네임을 사용합니다.
                 update_character_hp(user_name, guild_id, new_hp)
+            # 상황 설명 생성: Gemini API 사용 시도
             narrative = ""
             if gemini_client:
                 try:
@@ -439,8 +440,29 @@ class TRPGCog(commands.Cog):
                     narrative = resp.text if hasattr(resp, "text") else ""
                 except Exception as e:
                     print(f"⚠️ Gemini 상황 생성 실패: {e}")
+            # Gemini가 실패하거나 빈 문자열을 반환한 경우, fallback 스토리 생성
             if not narrative:
-                narrative = "모험이 계속됩니다."
+                # 스토리 템플릿: 이전 상황과 행동/결과를 이어주는 서술 생성
+                result_desc = {
+                    "critical_success": "압도적인 성공을 거두어",
+                    "success": "성공적으로",
+                    "failure": "실패하여",
+                    "critical_failure": "끔찍하게 실패하여",
+                }[outcome]
+                # 판타지 배경의 다음 이벤트 후보
+                events = [
+                    "당신 앞에 두 갈래 길이 나타납니다.",
+                    "멀리서 몬스터의 울음소리가 들려옵니다.",
+                    "낡은 상인이 당신을 부릅니다.",
+                    "작은 마법 상자가 눈에 띕니다.",
+                    "숲 속에서 신비한 빛이 반짝입니다.",
+                    "근처에 모험가 길드의 깃발이 보입니다.",
+                ]
+                next_event = random.choice(events)
+                narrative = (
+                    f"이전 상황에서 당신은 '{내용}' 행동을 시도했고 {result_desc} 결과를 얻었습니다. "
+                    f"{next_event} 다음 행동을 결정해야 합니다."
+                )
             # 새 상황을 업데이트합니다. 닉네임 기준으로 저장합니다.
             update_character_state(user_name, guild_id, narrative)
             embed = discord.Embed(title="행동 결과", color=discord.Color.purple())
