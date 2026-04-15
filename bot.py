@@ -93,8 +93,13 @@ bot.tree.add_command(affinity_group)
 @bot.event
 async def on_ready():
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ {len(synced)}개의 슬래시 명령어 동기화 완료!")
+        # 먼저 전체 글로벌 명령어를 동기화합니다.
+        synced_global = await bot.tree.sync()
+        print(f"✅ {len(synced_global)}개의 글로벌 명령어 동기화 완료!")
+        # 지정된 길드에 대해서도 별도로 동기화하여 슬래시 명령어가 즉시 표시되도록 합니다.
+        guild = discord.Object(id=GUILD_ID_1)
+        synced_guild = await bot.tree.sync(guild=guild)
+        print(f"✅ {len(synced_guild)}개의 길드 명령어 동기화 완료! (Guild ID: {GUILD_ID_1})")
     except Exception as e:
         print(f"❌ 명령어 동기화 실패: {e}")
     print(f'✅ 봇 로그인됨: {bot.user}')
@@ -268,6 +273,7 @@ async def 랭킹(interaction: discord.Interaction):
         msg += f"{medal} {r['user_name']} ― `{r.get('affinity', 0)}점` (💬 {r.get('chat_count', 0)}회)\n"
     await interaction.followup.send(msg)
 
+
 @bot.tree.command(name="성격", description="뜌비의 성격을 변경합니다.")
 @app_commands.choices(설정=[
     app_commands.Choice(name="기본", value="기본"),
@@ -282,6 +288,7 @@ async def 성격변경(interaction: discord.Interaction, 설정: app_commands.Ch
 
     bot.current_personality = 설정.value
     await interaction.response.send_message(f"✅ 뜌비의 성격이 **{설정.value}** 상태로 바뀌었어!")
+
 
 @bot.tree.command(name="자동입장", description="자동 재접속 기능을 설정합니다.")
 @app_commands.choices(상태=[
@@ -298,6 +305,7 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
         await interaction.guild.voice_client.disconnect()
 
     await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
+
 
 @bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
@@ -317,6 +325,7 @@ async def 모델확인(interaction: discord.Interaction):
     status_msg += f"🧠 **현재 활성 모델: {bot.active_model}**"
 
     await interaction.response.send_message(status_msg)
+
 
 if __name__ == '__main__':
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8000}, daemon=True).start()
