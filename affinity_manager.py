@@ -1,3 +1,5 @@
+# affinity_manager.py
+
 import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -30,51 +32,8 @@ def get_user_affinity(user_id, user_name):
         print(f"❌ 친밀도 조회 에러: {e}")
         return 0
 
-def update_user_affinity(user_id, user_name, amount, reset=False):
-    """친밀도와 채팅 횟수를 업데이트하고 업데이트 전/후 점수를 반환합니다."""
-    try:
-        res = supabase.table(TABLE_NAME).select("affinity, chat_count").eq("user_id", str(user_id)).execute()
-        
-        if res.data:
-            old_affinity = res.data[0].get('affinity', 0)
-            old_chats = res.data[0].get('chat_count', 0)
-            
-            new_affinity = amount if reset else old_affinity + amount
-            new_chats = old_chats + 1
-            
-            supabase.table(TABLE_NAME).update({
-                "affinity": new_affinity,
-                "chat_count": new_chats,
-                "user_name": user_name
-            }).eq("user_id", str(user_id)).execute()
-            
-            return old_affinity, new_affinity
-        else:
-            new_score = amount
-            supabase.table(TABLE_NAME).insert({
-                "user_id": str(user_id),
-                "user_name": user_name,
-                "affinity": new_score,
-                "chat_count": 1
-            }).execute()
-            return 0, new_score
-    except Exception as e:
-        print(f"❌ 업데이트 에러: {e}")
-        return 0, 0
-
-def get_affinity_ranking(limit=30):
-    """친밀도 상위 랭킹을 가져옵니다."""
-    try:
-        res = supabase.table(TABLE_NAME).select("*").order("affinity", desc=True).limit(limit).execute()
-        return res.data or []
-    except Exception as e:
-        print(f"❌ 랭킹 로딩 에러: {e}")
-        return []
-
-# ... (기존 상단 코드 동일)
-
 def get_attitude_guide(affinity):
-    """친밀도 단계에 따른 뜌비의 태도 가이드를 반환합니다."""
+    """친밀도 단계 가이드"""
     if affinity <= -31:
         return "혐오 상태. 상대를 극도로 싫어하며 차갑게 무시함."
     elif -30 <= affinity <= -1:
@@ -86,7 +45,36 @@ def get_attitude_guide(affinity):
     else:
         return "절친 상태. 편하게 말하고 무한한 신뢰와 깊은 애정을 표현함."
 
-# ... (나머지 함수 동일)
+def update_user_affinity(user_id, user_name, amount, reset=False):
+    """친밀도와 채팅 횟수를 업데이트합니다."""
+    try:
+        res = supabase.table(TABLE_NAME).select("affinity, chat_count").eq("user_id", str(user_id)).execute()
+        
+        if res.data:
+            current_affinity = res.data[0].get('affinity', 0)
+            current_chats = res.data[0].get('chat_count', 0)
+            
+            new_affinity = amount if reset else current_affinity + amount
+            new_chats = current_chats + 1
+            
+            supabase.table(TABLE_NAME).update({
+                "affinity": new_affinity,
+                "chat_count": new_chats,
+                "user_name": user_name
+            }).eq("user_id", str(user_id)).execute()
+            return current_affinity, new_affinity
+        else:
+            new_affinity = amount
+            supabase.table(TABLE_NAME).insert({
+                "user_id": str(user_id),
+                "user_name": user_name,
+                "affinity": new_affinity,
+                "chat_count": 1
+            }).execute()
+            return 0, new_affinity
+    except Exception as e:
+        print(f"❌ 친밀도 업데이트 에러: {e}")
+        return 0, 0
 
 def get_memory_from_db(user_name):
     """최근 대화 기억 15개를 불러옵니다."""
@@ -116,9 +104,18 @@ def get_top_ranker_id():
     """전체 1위 유저의 ID를 가져옵니다."""
     try:
         res = supabase.table(TABLE_NAME).select("user_id").order("affinity", desc=True).limit(1).execute()
-        if res.data and len(res.data) > 0:
+        if res.data:
             return int(res.data[0]['user_id'])
         return None
     except Exception as e:
-        print(f"❌ 1위 조회 에러: {e}")
+        print(f"❌ 랭커 조회 에러: {e}")
         return None
+
+def get_affinity_ranking(limit=30):
+    """친밀도 랭킹 리스트를 가져옵니다."""
+    try:
+        res = supabase.table(TABLE_NAME).select("user_name, affinity, chat_count").order("affinity", desc=True).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"❌ 랭킹 조회 에러: {e}")
+        return []
