@@ -158,35 +158,79 @@ def get_user_ranking(user_id: int, guild_id: int) -> Optional[int]:
 
 
 class ReactionSpeedView(discord.ui.View):
-    """사용자가 버튼을 클릭할 수 있는 View. 클릭 시 반응속도를 측정합니다."""
+    """사용자가 버튼을 클릭할 수 있는 View. 클릭 시 반응속도를 측정합니다.
 
-    def __init__(self, user_id: int, guild_id: int, username: str, start_time: float):
+    이 뷰는 반응속도 게임의 상태를 내부에 저장합니다. 버튼은 게임 시작 단계인 "준비" 상태에도
+    표시되며, 이때 누르면 실격 처리됩니다. "지금!" 상태가 된 후 누르면 반응속도를 계산합니다.
+    """
+
+    def __init__(self, user_id: int, guild_id: int, username: str) -> None:
         super().__init__(timeout=None)
-        self.user_id = user_id
-        self.guild_id = guild_id
-        self.username = username
-        self.start_time = start_time
-        self.clicked = False
+        self.user_id: int = user_id
+        self.guild_id: int = guild_id
+        self.username: str = username
+        # 게임이 시작되기 전에는 start_time이 None입니다. 시작 후에는 perf_counter 값이 저장됩니다.
+        self.start_time: Optional[float] = None
+        # 메시지 객체를 저장합니다. command에서 설정됩니다.
+        self.message: Optional[discord.Message] = None
+        # 사용자가 이미 클릭했는지 여부를 표시합니다.
+        self.clicked: bool = False
+
+    def set_message(self, message: discord.Message) -> None:
+        """뷰에서 나중에 메시지를 수정할 수 있도록 메시지 객체를 저장합니다."""
+        self.message = message
 
     @discord.ui.button(label="클릭!", style=discord.ButtonStyle.primary)
-    async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):  # type: ignore[override]
-        """버튼 클릭 시 호출되는 콜백."""
+    async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        """버튼 클릭 시 호출되는 콜백.
+
+        게임의 상태에 따라 조기 클릭인지 정상 클릭인지 판단하고, 결과를 메시지에 반영합니다.
+        """
         # 명령을 실행한 사용자만 버튼을 클릭할 수 있도록 제한합니다.
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 버튼은 명령을 실행한 사용자만 누를 수 있어요!", ephemeral=True)
-            return
-        # 이미 클릭했다면 중복 실행을 막습니다.
-        if self.clicked:
-            await interaction.response.send_message("이미 기록이 저장되었습니다!", ephemeral=True)
+            await interaction.response.send_message(
+                "이 버튼은 명령을 실행한 사용자만 누를 수 있어요!",
+                ephemeral=True,
+            )
             return
 
+        # 이미 클릭했다면 중복 실행을 막습니다.
+        if self.clicked:
+            await interaction.response.send_message(
+                "이미 기록이 저장되었습니다!",
+                ephemeral=True,
+            )
+            return
+
+        # 클릭 플래그 설정
         self.clicked = True
-        # 반응속도 계산
+
+        # 메시지가 설정되어 있지 않다면 오류. 일반적으로 발생하지 않음.
+        if not self.message:
+            await interaction.response.send_message(
+                "내부 오류: 메시지를 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 아직 게임이 시작되지 않았다면 (준비 상태)
+        if self.start_time is None:
+            # 버튼 비활성화
+            button.disabled = True
+            # 실격 메시지
+            embed = discord.Embed(title="반응속도 게임", color=discord.Color.red())
+            embed.add_field(name="결과", value="❌ 너무 빠르게 눌렀습니다!", inline=False)
+            embed.set_footer(text="다시 도전해보세요.")
+            await interaction.response.edit_message(embed=embed, view=self)
+            # 게임 종료
+            self.stop()
+            return
+
+        # 여기까지 왔으면 정상적으로 "지금!" 이후 클릭한 것
         end_time = time.perf_counter()
         reaction_ms = int((end_time - self.start_time) * 1000)
         # 버튼 비활성화
         button.disabled = True
-        await interaction.response.edit_message(view=self)
 
         # Supabase에서 현재 최고 기록을 가져와 업데이트 여부 확인
         previous_best = get_user_best(self.user_id, self.guild_id)
@@ -198,15 +242,17 @@ class ReactionSpeedView(discord.ui.View):
         # 등수 계산
         ranking = get_user_ranking(self.user_id, self.guild_id)
 
-        # 결과 메시지 작성
-        result_msg = f"반응속도: {reaction_ms}ms"
+        # 결과 Embed 작성
+        embed = discord.Embed(title="반응속도 게임", color=discord.Color.green())
+        embed.add_field(name="반응속도", value=f"{reaction_ms}ms", inline=False)
         if new_record:
-            result_msg += " 🎉 새로운 개인 최고 기록!"
+            embed.add_field(name="🎉 기록 갱신", value="개인 최고 기록을 갱신했습니다!", inline=False)
         if ranking:
-            result_msg += f" (서버 내 {ranking}위)"
+            embed.add_field(name="서버 등수", value=f"현재 서버 내 {ranking}위", inline=False)
+        embed.set_footer(text="게임이 종료되었습니다.")
 
-        await interaction.followup.send(result_msg, ephemeral=False)
-        # View 종료
+        await interaction.response.edit_message(embed=embed, view=self)
+        # 게임 종료
         self.stop()
 
 
@@ -219,19 +265,51 @@ class ReactionSpeedCog(commands.Cog):
     @app_commands.guilds(discord.Object(id=1228372760212930652))
     @app_commands.command(name="반응속도", description="반응속도 게임을 시작합니다.")
     async def reaction_speed(self, interaction: discord.Interaction) -> None:
-        """사용자와 반응속도 게임을 진행합니다."""
-        # 게임 시작을 알리는 메시지
-        await interaction.response.send_message("준비...", ephemeral=False)
-        # 2~5초 사이 랜덤 대기 후 '지금!' 메시지를 출력
-        await asyncio.sleep(random.uniform(2.0, 5.0))
-        start_time = time.perf_counter()
+        """사용자와 반응속도 게임을 진행합니다.
+
+        이 명령은 한 개의 메시지에 버튼을 포함하여 게임을 진행합니다. '준비...' 단계에서 버튼을
+        표시하고, 정해진 시간이 지난 후 '지금!'으로 전환합니다. 너무 빨리 누르면 실격 처리되며,
+        정상적으로 누르면 반응속도를 계산합니다.
+        """
+        # 초기 안내 Embed
+        embed = discord.Embed(title="반응속도 게임", color=discord.Color.blue())
+        embed.add_field(
+            name="준비...", value="버튼이 활성화될 때까지 기다렸다가 눌러주세요!", inline=False
+        )
+        embed.set_footer(text="너무 일찍 누르면 실격입니다.")
+
+        # View 생성 (start_time은 None)
         view = ReactionSpeedView(
             user_id=interaction.user.id,
             guild_id=interaction.guild.id if interaction.guild else 0,
             username=interaction.user.display_name,
-            start_time=start_time,
         )
-        await interaction.followup.send("지금!", view=view, ephemeral=False)
+
+        # 메시지 전송 및 메시지 객체 저장
+        message = await interaction.response.send_message(
+            embed=embed, view=view, wait=True
+        )
+        # message는 send_message가 반환하는 Message 객체입니다.
+        # View에 메시지 객체를 등록하여 콜백에서 수정할 수 있게 합니다.
+        if isinstance(message, discord.Message):
+            view.set_message(message)
+
+        # 2~5초 사이 랜덤 대기
+        await asyncio.sleep(random.uniform(2.0, 5.0))
+
+        # 게임 시작 시각 저장
+        view.start_time = time.perf_counter()
+
+        # '지금!' 메시지로 embed 업데이트
+        embed = discord.Embed(title="반응속도 게임", color=discord.Color.gold())
+        embed.add_field(
+            name="지금!", value="지금 버튼을 누르세요!", inline=False
+        )
+        embed.set_footer(text="버튼을 눌러서 반응속도를 측정해보세요.")
+
+        # 메시지 수정 (embed와 view는 동일, 버튼 활성 상태 유지)
+        if view.message:
+            await view.message.edit(embed=embed, view=view)
 
     @app_commands.guilds(discord.Object(id=1228372760212930652))
     @app_commands.command(name="반응속도랭킹", description="서버 내 반응속도 랭킹을 확인합니다.")
