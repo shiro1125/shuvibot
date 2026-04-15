@@ -5,6 +5,53 @@ from discord.ext import voice_recv
 import asyncio
 import os
 
+# -----------------------------------------------------------------------------
+# Patch: Work around Opus corrupted stream errors in discord-ext-voice-recv
+#
+# The discord-ext-voice-recv library has a known issue where the internal
+# Opus decoder can raise `discord.opus.OpusError: corrupted stream` when
+# handling incoming audio packets. This exception bubbles out of a background
+# thread and will cause the entire voice receiving loop to halt, preventing
+# further audio processing. To improve stability we monkey‑patch the
+# Decoder.decode method to catch these errors and return an empty PCM
+# payload instead. This avoids crashing the router and simply skips the
+# corrupted packet. The patch is applied once on import and logs any
+# failures.
+try:
+    # Import the underlying decoder module from voice_recv. If these imports
+    # fail (for example if discord.ext.voice_recv is not present) we skip
+    # patching and log the reason.
+    import discord.ext.voice_recv.opus as _opus_module  # type: ignore
+    import discord.opus as _discord_opus  # type: ignore
+    # Save original decode method
+    _orig_decode = _opus_module.Decoder.decode
+
+    def _safe_decode(self, data, fec=False):  # type: ignore
+        """
+        Wrapper for Decoder.decode that catches OpusError exceptions.
+
+        If a corrupted stream error occurs, log it and return empty audio
+        instead of raising an exception. This prevents the voice router from
+        crashing due to unhandled exceptions.
+        """
+        try:
+            return _orig_decode(self, data, fec)
+        except _discord_opus.OpusError as oe:
+            # Log the error for debugging but do not propagate it further.
+            print(f"[VOICECHAT] Opus decode error: {oe}. Skipping packet", flush=True)
+            # Return empty PCM data to effectively drop the packet. The frame
+            # size used by discord-ext-voice-recv corresponds to 20ms at
+            # 48000Hz, stereo, 16‑bit samples (i.e. 1920 samples * 4 bytes).
+            return b""  # drop packet
+
+    # Apply the monkey patch
+    _opus_module.Decoder.decode = _safe_decode  # type: ignore
+    print("[VOICECHAT] Patched Opus decoder to handle corrupted stream errors", flush=True)
+except Exception as _patch_err:
+    # If patching fails, log the reason. It is still safe to proceed without
+    # the patch, but the bot may be more prone to crashes when receiving audio.
+    print(f"[VOICECHAT] Failed to patch Opus decoder: {_patch_err}", flush=True)
+
 # 내부 모듈 임포트
 from stt import BasicSink
 import tts_module
