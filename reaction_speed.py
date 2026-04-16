@@ -49,6 +49,7 @@ from typing import Optional, List
 import discord
 from discord.ext import commands
 from discord import app_commands
+from dotenv import load_dotenv
 
 try:
     # supabase 패키지가 설치되어 있어야 합니다. 설치되어 있지 않다면
@@ -62,6 +63,8 @@ except ImportError:
             "Supabase 패키지가 설치되어 있지 않습니다. 'pip install supabase' 명령으로 설치하세요."
         )
 
+
+load_dotenv()
 
 # 환경 변수에서 Supabase 설정을 불러옵니다. 실제 서비스 환경에서는 .env에 값을 추가해야 합니다.
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -296,6 +299,9 @@ class ReactionSpeedCog(commands.Cog):
         표시하고, 정해진 시간이 지난 후 '지금!'으로 전환합니다. 너무 빨리 누르면 실격 처리되며,
         정상적으로 누르면 반응속도를 계산합니다.
         """
+        # MODIFIED: 인터랙션 만료 방지를 위해 즉시 defer 합니다.
+        await interaction.response.defer()
+
         # 초기 안내 Embed
         embed = discord.Embed(title="반응속도 게임", color=discord.Color.blue())
         embed.add_field(
@@ -311,7 +317,7 @@ class ReactionSpeedCog(commands.Cog):
         )
 
         # 메시지 전송
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
         # InteractionResponse.send_message는 메시지를 반환하지 않으므로,
         # original_response()를 통해 메시지 객체를 가져옵니다.
         try:

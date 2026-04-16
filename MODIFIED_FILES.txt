@@ -1,0 +1,35 @@
+수정/추가된 파일
+- bot.py (메인 실행 경량화, flush 루프 연결)
+- affinity_manager.py (친밀도 캐시 + 실시간 반영 + 주기 저장)
+- memory_service.py (기억 캐시 + 5분 주기 저장)
+- ai_service.py (Gemini 호출 분리)
+- response_service.py (응답 흐름 분리)
+- db_client.py (Supabase 지연 초기화)
+- cache_store.py (TTL 캐시 유틸)
+- perf_utils.py (성능 로그 유틸)
+- config.py (환경 변수/상수 분리)
+
+핵심 변경
+- Google API 전체 모델 조회 기능 제거 유지
+- 200자 초과 메시지 무시 유지
+- 친밀도는 캐시에 즉시 반영되고 주기적으로 DB 저장
+- 기억은 캐시에 쌓고 5분마다 DB 저장
+- bot.py는 이벤트/초기화 중심으로 단순화
+- 기존 사용자 메시지/출력 문구는 유지
+
+- search_service.py 추가 (SerpAPI 기반 검색 + DuckDuckGo fallback)
+- config.py 수정 (SERPAPI_API_KEY 및 검색 설정 환경변수 추가)
+- response_service.py 수정 (검색 컨텍스트를 유저 입력과 함께 프롬프트에 주입)
+- bot.py 수정 (검색 컨텍스트 생성 및 injected_into_prompt 로그 추가)
+- .env.example 수정 (SERPAPI 관련 설정 추가)
+
+- ai_service.py 수정 (간단 텍스트 생성 함수 추가)
+- search_service.py 수정 (AI 검색 판단 + AI 검색어 재작성 + 검색 실패 시 추측 금지)
+- config.py 수정 (검색 판단/쿼리 생성 옵션 추가)
+- .env.example 수정 (검색 관련 새 환경변수 추가)
+
+추가 변경
+- 키워드만으로 결정하지 않고, 애매한 질문은 AI가 검색 필요 여부를 보조 판단
+- 검색어는 규칙 기반 정제 후 AI가 한 번 더 검색엔진용 키워드로 재작성
+- 검색 결과가 0개일 때도 최신/사실 정보는 추측하지 않도록 프롬프트에 안전장치 추가
+- SerpAPI 실패 시 DuckDuckGo fallback 유지

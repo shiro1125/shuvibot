@@ -1,112 +1,198 @@
 # affinity_manager.py
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
+# MODIFIED: 친밀도 캐시 / 즉시 반영 / 주기적 DB 저장 구조로 전면 재구성
+import threading
+from typing import Dict, Optional
 
-load_dotenv()
+from cache_store import TTLCache
+from config import AFFINITY_CACHE_TTL_SECONDS
+from db_client import get_supabase
 
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+_affinity_cache = TTLCache[dict](AFFINITY_CACHE_TTL_SECONDS)
+_affinity_lock = threading.RLock()
+_dirty_users: set[str] = set()
 
-def get_user_affinity(user_id, user_name):
-    """유저의 친밀도를 조회하고, 없으면 생성합니다 (옛날 코드 로직 100% 동일)"""
+
+def _cache_key(user_id) -> str:
+    return str(user_id)
+
+
+def _load_from_db(user_id, user_name) -> dict:
+    supabase = get_supabase()
+    if not supabase:
+        return {"user_id": str(user_id), "user_name": user_name, "affinity": 0, "chat_count": 0}
+
     try:
-        res = supabase.table("user_stats").select("affinity").eq("user_id", user_id).execute()
+        res = (
+            supabase.table("user_stats")
+            .select("user_id, user_name, affinity, chat_count")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
         if res.data:
-            return res.data[0]['affinity']
-        else:
-            supabase.table("user_stats").upsert({
-                "user_id": user_id,
-                "user_name": user_name,
-                "affinity": 0,
-                "chat_count": 0
-            }).execute()
-            return 0
+            row = res.data[0]
+            return {
+                "user_id": str(user_id),
+                "user_name": row.get("user_name", user_name),
+                "affinity": int(row.get("affinity", 0)),
+                "chat_count": int(row.get("chat_count", 0)),
+            }
+
+        row = {"user_id": str(user_id), "user_name": user_name, "affinity": 0, "chat_count": 0}
+        supabase.table("user_stats").upsert(row).execute()
+        return row
     except Exception as e:
         print(f"❌ 친밀도 조회 에러: {e}")
-        return 0
+        return {"user_id": str(user_id), "user_name": user_name, "affinity": 0, "chat_count": 0}
+
+
+def _ensure_cached(user_id, user_name) -> dict:
+    key = _cache_key(user_id)
+    cached = _affinity_cache.get(key)
+    if cached is not None:
+        return dict(cached)
+
+    row = _load_from_db(user_id, user_name)
+    _affinity_cache.set(key, row)
+    return dict(row)
+
+
+def get_user_affinity(user_id, user_name):
+    row = _ensure_cached(user_id, user_name)
+    return int(row.get("affinity", 0))
+
 
 def update_user_affinity(user_id, user_name, amount):
-    try:
-        res = supabase.table("user_stats").select("affinity, chat_count").eq("user_id", user_id).execute()
-        if res.data:
-            current_affinity = res.data[0].get("affinity", 0)
-            current_chat_count = res.data[0].get("chat_count", 0)
-        else:
-            current_affinity = 0
-            current_chat_count = 0
+    key = _cache_key(user_id)
+    with _affinity_lock:
+        row = _ensure_cached(user_id, user_name)
+        row["user_name"] = user_name
+        row["affinity"] = int(row.get("affinity", 0)) + int(amount)
+        row["chat_count"] = int(row.get("chat_count", 0)) + 1
+        _affinity_cache.set(key, row)
+        _dirty_users.add(key)
+        current_affinity = int(row["affinity"])
 
-        new_affinity = current_affinity + amount
-        new_chat_count = current_chat_count + 1
+    diff_str = f"+{amount}" if amount >= 0 else f"{amount}"
+    print(f"✅ {user_name} 친밀도 업데이트: {current_affinity - int(amount)} -> {current_affinity} ({diff_str})", flush=True)
+    return current_affinity
 
-        supabase.table("user_stats").upsert({
-            "user_id": user_id,
-            "user_name": user_name,
-            "affinity": new_affinity,
-            "chat_count": new_chat_count
-        }).execute()
-
-        diff_str = f"+{amount}" if amount >= 0 else f"{amount}"
-        print(f"✅ {user_name} 친밀도 업데이트: {current_affinity} -> {new_affinity} ({diff_str})", flush=True)
-    except Exception as e:
-        print(f"❌ 친밀도 업데이트 실패: {e}")
 
 def set_user_affinity(user_id, user_name, target_score):
-    try:
-        res = supabase.table("user_stats").select("chat_count").eq("user_id", user_id).execute()
-        current_chat_count = res.data[0].get("chat_count", 0) if (res and res.data and len(res.data) > 0) else 0
+    key = _cache_key(user_id)
+    with _affinity_lock:
+        row = _ensure_cached(user_id, user_name)
+        row["user_name"] = user_name
+        row["affinity"] = int(target_score)
+        _affinity_cache.set(key, row)
+        _dirty_users.add(key)
+    return flush_user_affinity(user_id)
 
-        supabase.table("user_stats").upsert({
-            "user_id": user_id,
-            "user_name": user_name,
-            "affinity": target_score,
-            "chat_count": current_chat_count
-        }).execute()
-        return True
-    except Exception as e:
-        print(f"❌ 친밀도 설정 에러: {e}")
+
+def flush_user_affinity(user_id) -> bool:
+    key = _cache_key(user_id)
+    row = _affinity_cache.get(key)
+    if not row:
         return False
 
+    supabase = get_supabase()
+    if not supabase:
+        return False
+
+    try:
+        supabase.table("user_stats").upsert({
+            "user_id": str(row["user_id"]),
+            "user_name": row["user_name"],
+            "affinity": int(row.get("affinity", 0)),
+            "chat_count": int(row.get("chat_count", 0)),
+        }).execute()
+        with _affinity_lock:
+            _dirty_users.discard(key)
+        return True
+    except Exception as e:
+        print(f"❌ 친밀도 저장 실패: {e}")
+        return False
+
+
+def flush_affinity_updates() -> int:
+    with _affinity_lock:
+        keys = list(_dirty_users)
+
+    if not keys:
+        return 0
+
+    supabase = get_supabase()
+    if not supabase:
+        return 0
+
+    payload = []
+    for key in keys:
+        row = _affinity_cache.get(key)
+        if row:
+            payload.append({
+                "user_id": str(row["user_id"]),
+                "user_name": row["user_name"],
+                "affinity": int(row.get("affinity", 0)),
+                "chat_count": int(row.get("chat_count", 0)),
+            })
+
+    if not payload:
+        return 0
+
+    try:
+        supabase.table("user_stats").upsert(payload).execute()
+        with _affinity_lock:
+            for key in keys:
+                _dirty_users.discard(key)
+        return len(payload)
+    except Exception as e:
+        print(f"❌ 친밀도 일괄 저장 실패: {e}")
+        return 0
+
+
 def get_top_ranker_id():
+    supabase = get_supabase()
+    if not supabase:
+        return None
     try:
         res = supabase.table("user_stats").select("user_id").order("affinity", desc=True).limit(1).execute()
         if res.data and len(res.data) > 0:
-            return res.data[0]['user_id']
+            return res.data[0]["user_id"]
         return None
     except Exception as e:
         print(f"❌ 1위 조회 에러 (get_top_ranker_id): {e}")
         return None
 
+
 def get_affinity_ranking(limit=30):
+    supabase = get_supabase()
+    if not supabase:
+        return []
     try:
-        res = supabase.table("user_stats").select("user_name, affinity, chat_count").order("affinity", desc=True).limit(limit).execute()
+        res = (
+            supabase.table("user_stats")
+            .select("user_name, affinity, chat_count")
+            .order("affinity", desc=True)
+            .limit(limit)
+            .execute()
+        )
         return res.data or []
     except Exception as e:
         print(f"❌ 랭킹 조회 에러: {e}")
         return []
 
-def get_memory_from_db(user_name):
-    try:
-        res = supabase.table("memory").select("*").eq("user_name", user_name).order("created_at", desc=True).limit(15).execute()
-        memory_list = res.data or []
-        formatted_memory = ""
-        for m in reversed(memory_list):
-            formatted_memory += f"{m['user_name']}: {m['user_msg']} -> 뜌비: {m['bot_res']}\n"
-        return formatted_memory
-    except Exception as e:
-        print(f"❌ 기억 불러오기 에러: {e}")
-        return ""
+
+def get_memory_from_db(user_name, limit: int = 3, max_chars: int = 500):
+    # MODIFIED: 기존 호출 호환용 래퍼
+    from memory_service import get_memory_context
+    return get_memory_context(user_name, limit=limit, max_chars=max_chars)
+
 
 def save_to_memory(user_name, user_msg, bot_res):
-    try:
-        supabase.table("memory").insert({
-            "user_name": user_name,
-            "user_msg": user_msg,
-            "bot_res": bot_res
-        }).execute()
-    except Exception as e:
-        print(f"❌ 기억 저장 에러: {e}")
+    # MODIFIED: 기존 호출 호환용 래퍼
+    from memory_service import queue_memory_save
+    queue_memory_save(user_name, user_msg, bot_res)
+
 
 def get_attitude_guide(affinity):
     if affinity <= -31:
