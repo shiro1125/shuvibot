@@ -15,6 +15,7 @@ from google import genai
 # 모듈화된 파일 임포트
 import affinity_manager
 import personality
+import affinity_rules
 
 load_dotenv()
 
@@ -185,9 +186,9 @@ async def on_message(message):
                                     score_val_str = parts[1].split("]")[0].strip()
 
                                     raw_score = int(score_val_str.replace("+", ""))
-                                    score_change = max(-20, min(20, raw_score))
+                                    score_change = affinity_rules.apply_score_rules(user_name, message.content, raw_score)
 
-                                    if raw_score > 20 or raw_score < -20:
+                                    if raw_score != score_change:
                                         print(f"⚠️ SCORE 보정 적용: {raw_score} -> {score_change}")
                                 except Exception as parse_err:
                                     print(f"⚠️ 점수 파싱 에러: {parse_err}")
