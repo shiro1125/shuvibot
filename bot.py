@@ -55,9 +55,9 @@ class MyBot(commands.Bot):
         self.active_model = "대기 중"
 
         self.model_list = [
-            "models/gemini-3.1-Pro"
-            "models/gemini-2.5-Pro"
-            "models/gemini-2-flash"
+            "models/gemini-3.1-Pro",
+            "models/gemini-2.5-Pro",
+            "models/gemini-2-flash",
             "models/gemini-3-flash-preview",
             "models/gemini-2.5-flash",
             "models/gemini-3.1-flash-lite-preview",
