@@ -24,6 +24,10 @@ class TTS(commands.Cog):
         텍스트를 입력받아 ElevenLabs API로 음성 파일을 생성한 뒤
         현재 사용자가 있는 음성 채널에서 재생합니다. 과정 중 상세 로그를 출력합니다.
         """
+        if not interaction.guild or not getattr(interaction.user, "guild_permissions", None) or not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있습니다", ephemeral=True)
+            return
+
         if not interaction.user.voice:
             await interaction.response.send_message("⚠️ 먼저 음성 채널에 들어가 주세요!", ephemeral=True)
             return

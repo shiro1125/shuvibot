@@ -16,6 +16,12 @@ def _cache_key(user_id) -> str:
     return str(user_id)
 
 
+def clear_cache():
+    with _affinity_lock:
+        _affinity_cache.clear()
+        _dirty_users.clear()
+
+
 def _load_from_db(user_id, user_name) -> dict:
     supabase = get_supabase()
     if not supabase:
@@ -44,6 +50,31 @@ def _load_from_db(user_id, user_name) -> dict:
     except Exception as e:
         print(f"❌ 친밀도 조회 에러: {e}")
         return {"user_id": str(user_id), "user_name": user_name, "affinity": 0, "chat_count": 0}
+
+
+def load_all_from_db_to_cache() -> int:
+    supabase = get_supabase()
+    if not supabase:
+        return 0
+    try:
+        res = supabase.table("user_stats").select("user_id, user_name, affinity, chat_count").execute()
+        rows = res.data or []
+        with _affinity_lock:
+            _affinity_cache.clear()
+            _dirty_users.clear()
+            for row in rows:
+                normalized = {
+                    "user_id": str(row.get("user_id", "")),
+                    "user_name": str(row.get("user_name", "")),
+                    "affinity": int(row.get("affinity", 0) or 0),
+                    "chat_count": int(row.get("chat_count", 0) or 0),
+                }
+                if normalized["user_id"]:
+                    _affinity_cache.set(_cache_key(normalized["user_id"]), normalized)
+        return len(rows)
+    except Exception as e:
+        print(f"❌ 전체 친밀도 불러오기 에러: {e}")
+        return 0
 
 
 def _ensure_cached(user_id, user_name) -> dict:
@@ -114,9 +145,11 @@ def flush_user_affinity(user_id) -> bool:
         return False
 
 
-def flush_affinity_updates() -> int:
+def flush_affinity_updates(force_all: bool = False) -> int:
     with _affinity_lock:
         keys = list(_dirty_users)
+        if force_all:
+            keys = list(_affinity_cache._data.keys())
 
     if not keys:
         return 0
@@ -149,6 +182,33 @@ def flush_affinity_updates() -> int:
         print(f"❌ 친밀도 일괄 저장 실패: {e}")
         return 0
 
+
+
+def get_cached_affinity_only(user_id):
+    row = _affinity_cache.get(_cache_key(user_id))
+    if not row:
+        return None
+    return int(dict(row).get("affinity", 0))
+
+
+def apply_immediate_affinity_change(user_id, user_name, amount, increment_chat=False):
+    key = _cache_key(user_id)
+    with _affinity_lock:
+        row = _ensure_cached(user_id, user_name)
+        before = int(row.get("affinity", 0))
+        row["user_name"] = user_name
+        row["affinity"] = before + int(amount)
+        if increment_chat:
+            row["chat_count"] = int(row.get("chat_count", 0)) + 1
+        _affinity_cache.set(key, row)
+        _dirty_users.add(key)
+        after = int(row.get("affinity", 0))
+
+    if flush_user_affinity(user_id):
+        print(f"✅ {user_name} 친밀도 즉시 저장: {before} -> {after} ({'+' if int(amount) >= 0 else ''}{int(amount)})", flush=True)
+    else:
+        print(f"⚠️ {user_name} 친밀도 즉시 저장 실패, 캐시에만 반영됨: {before} -> {after}", flush=True)
+    return after
 
 def get_top_ranker_id():
     supabase = get_supabase()
@@ -183,13 +243,11 @@ def get_affinity_ranking(limit=30):
 
 
 def get_memory_from_db(user_name, limit: int = 3, max_chars: int = 500):
-    # MODIFIED: 기존 호출 호환용 래퍼
     from memory_service import get_memory_context
     return get_memory_context(user_name, limit=limit, max_chars=max_chars)
 
 
 def save_to_memory(user_name, user_msg, bot_res):
-    # MODIFIED: 기존 호출 호환용 래퍼
     from memory_service import queue_memory_save
     queue_memory_save(user_name, user_msg, bot_res)
 

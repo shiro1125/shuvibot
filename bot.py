@@ -1,26 +1,33 @@
 # bot.py
-# MODIFIED: bot.py는 초기화/이벤트 연결만 담당하도록 경량화
+# MODIFIED: 메인 봇 전용 실행 파일 (미연시 웹 기능 분리)
 import asyncio
-from threading import Thread
+import atexit
+import contextlib
 from typing import Dict, Optional
+from urllib.parse import quote_plus
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from flask import Flask
 
 import affinity_manager
 import ai_service
 import search_service
+import reaction_state
+import dating_bridge
 from config import (
     ACTIVE_MODEL_DEFAULT,
     AFFINITY_FLUSH_INTERVAL_SECONDS,
+    DATING_SIM_BASE_URL,
     DISCORD_TOKEN,
     GUILD_ID_1,
     MEMORY_FLUSH_INTERVAL_SECONDS,
+    SEARCH_ENABLED,
+    SHUTDOWN_FLUSH_TIMEOUT_SECONDS,
     SHUVI_USER_ID,
 )
-from memory_service import flush_memory_to_db
+from memory_service import flush_memory_to_db, get_recent_user_inputs_cache
+import db_admin_service
 from perf_utils import PerfTracker
 from response_service import (
     build_system_instruction,
@@ -32,14 +39,6 @@ from response_service import (
 )
 
 TOKEN = DISCORD_TOKEN
-
-app = Flask(__name__)
-
-
-@app.route("/")
-def health_check():
-    return "OK", 200
-
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -56,6 +55,7 @@ class MyBot(commands.Bot):
         self.model_status = {model: {"is_available": True} for model in self.model_list}
         self.channel_locks: Dict[int, asyncio.Lock] = {}
         self.flush_tasks_started = False
+        self.shutdown_flushed = False
 
     def get_channel_lock(self, channel_id: int) -> asyncio.Lock:
         if channel_id not in self.channel_locks:
@@ -72,6 +72,31 @@ class MyBot(commands.Bot):
             self.model_status[model_name]["is_available"] = False
             print(f"🚫 [경고] {model_name} 한도 초과. 오후 4시까지 건너뜁니다.")
 
+    async def flush_before_shutdown(self):
+        if self.shutdown_flushed:
+            return
+        self.shutdown_flushed = True
+
+        loop = asyncio.get_running_loop()
+
+        def _flush_all():
+            affinity_count = affinity_manager.flush_affinity_updates(force_all=True)
+            memory_count = flush_memory_to_db(clear_cache=False, flush_all_cached=True)
+            return affinity_count, memory_count
+
+        try:
+            affinity_count, memory_count = await asyncio.wait_for(
+                loop.run_in_executor(None, _flush_all),
+                timeout=SHUTDOWN_FLUSH_TIMEOUT_SECONDS,
+            )
+            print(f"💾 종료 전 DB 저장 완료: 친밀도 {affinity_count}건 / 일반 대화 {memory_count}건")
+        except Exception as e:
+            print(f"❌ 종료 전 DB 저장 실패: {e}")
+
+    async def close(self):
+        await self.flush_before_shutdown()
+        await super().close()
+
     async def setup_hook(self):
         extensions = ["tts", "blackjack", "scheduler", "voicechat", "reaction_speed", "trpg"]
         for ext in extensions:
@@ -84,7 +109,11 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 affinity_group = app_commands.Group(name="친밀도", description="뜌비와의 친밀도 관리")
+dating_group = app_commands.Group(name="미연시", description="뜌비와의 미연시 시스템")
+db_group = app_commands.Group(name="db", description="DB 전체 캐시 관리")
 bot.tree.add_command(affinity_group)
+bot.tree.add_command(dating_group)
+bot.tree.add_command(db_group)
 
 
 async def affinity_flush_loop():
@@ -98,9 +127,22 @@ async def memory_flush_loop():
     while True:
         await asyncio.sleep(MEMORY_FLUSH_INTERVAL_SECONDS)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, flush_memory_to_db)
+        await loop.run_in_executor(None, flush_memory_to_db, True)
 
 
+
+def _flush_before_exit():
+    if getattr(bot, "shutdown_flushed", False):
+        return
+    try:
+        affinity_count = affinity_manager.flush_affinity_updates(force_all=True)
+        memory_count = flush_memory_to_db(clear_cache=False, flush_all_cached=True)
+        bot.shutdown_flushed = True
+        print(f"💾 프로세스 종료 전 DB 저장 완료: 친밀도 {affinity_count}건 / 일반 대화 {memory_count}건")
+    except Exception as e:
+        print(f"❌ 프로세스 종료 전 DB 저장 실패: {e}")
+
+atexit.register(_flush_before_exit)
 @bot.event
 async def on_ready():
     try:
@@ -127,6 +169,9 @@ async def on_message(message):
         return
 
     channel_lock = bot.get_channel_lock(message.channel.id)
+    if db_admin_service.is_globally_locked():
+        return
+
     if channel_lock.locked():
         return
 
@@ -139,10 +184,15 @@ async def on_message(message):
             user_name = message.author.display_name
             user_message = message.content.strip()
 
-            affinity, history_context = await fetch_context(user_id, user_name, bot.current_personality)
-            search_context = await asyncio.get_running_loop().run_in_executor(
-                None, search_service.build_search_context, user_message
-            )
+            context_task = asyncio.create_task(fetch_context(user_id, user_name, bot.current_personality))
+            search_task = None
+            if SEARCH_ENABLED:
+                search_task = asyncio.get_running_loop().run_in_executor(
+                    None, search_service.build_search_context, user_message
+                )
+
+            affinity, history_context = await context_task
+            search_context = await search_task if search_task else ""
             perf.log("preprocess")
 
             system_instruction = build_system_instruction(user_id, user_name, bot.current_personality, affinity)
@@ -161,7 +211,7 @@ async def on_message(message):
 
                     if response and getattr(response, "text", None):
                         clean_res, score_change = parse_ai_response(response.text, user_name, user_message)
-                        await message.reply(clean_res)
+                        await message.reply(clean_res, mention_author=False)
                         perf.log("response_send")
 
                         await persist_after_response(
@@ -187,7 +237,7 @@ async def on_message(message):
 
             if not success:
                 bot.active_model = ACTIVE_MODEL_DEFAULT
-                await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 😭 내일 오후 4시에 다시 불러줘!")
+                await message.reply("미안! 지금은 뜌비가 기운이 없나 봐... 😭 내일 오후 4시에 다시 불러줘!", mention_author=False)
                 perf.log("response_send")
 
         except Exception as top_e:
@@ -312,6 +362,151 @@ async def 자동입장(interaction: discord.Interaction, 상태: app_commands.Ch
     await interaction.response.send_message(f"{'✅ 자동 입장 활성화' if 상태.value == 'on' else '❌ 자동 입장 비활성화'}")
 
 
+@bot.tree.command(name="반응", description="뜌비 키워드 반응을 켜거나 끕니다.")
+@app_commands.describe(상태="on 또는 off")
+@app_commands.choices(
+    상태=[
+        app_commands.Choice(name="on", value="on"),
+        app_commands.Choice(name="off", value="off"),
+    ]
+)
+async def 반응(interaction: discord.Interaction, 상태: app_commands.Choice[str]):
+    value = 상태.value.lower()
+    enabled = value == "on"
+
+    # MODIFIED: 유저 기준 on/off를 항상 적용하고, 서버 명령이면 서버도 같이 적용
+    reaction_state.set_user_reaction_enabled(interaction.user.id, enabled)
+
+    if interaction.guild is None:
+        if enabled:
+            await interaction.response.send_message("✅ 이제 개인 DM에서는 뜌비가 반응할게!", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ 이제 개인 DM에서는 뜌비가 반응하지 않을게!", ephemeral=True)
+        return
+
+    reaction_state.set_guild_reaction_enabled(interaction.guild.id, enabled)
+    if enabled:
+        await interaction.response.send_message("✅ 이제 이 서버에서는 뜌비가 반응할게!")
+    else:
+        await interaction.response.send_message("✅ 이제 이 서버에서는 뜌비가 반응하지 않을게!")
+
+
+
+
+
+@dating_group.command(name="시작", description="미연시를 시작합니다.")
+async def 미연시시작(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    user_id = interaction.user.id
+    user_name = interaction.user.display_name
+    affinity = affinity_manager.get_user_affinity(user_id, user_name)
+
+    if affinity < 1000:
+        await interaction.followup.send("미연시는 친밀도 1000 이상부터 시작할 수 있어!", ephemeral=True)
+        return
+
+    if not DATING_SIM_BASE_URL:
+        await interaction.followup.send("미연시 서버 주소가 아직 설정되지 않았어! .env의 DATING_SIM_BASE_URL을 확인해줘.", ephemeral=True)
+        return
+
+    url = f"{DATING_SIM_BASE_URL}/?user_id={user_id}&user_name={quote_plus(user_name)}"
+    embed = discord.Embed(
+        title="미연시 테스트",
+        description=(
+            "아래 주소로 들어가면 미연시 창이 열려!\n"
+            f"{url}"
+        ),
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@dating_group.command(name="정보", description="현재 미연시 상태를 확인합니다.")
+@app_commands.describe(유저="조회할 유저")
+async def 미연시정보(interaction: discord.Interaction, 유저: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild or not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다", ephemeral=True)
+        return
+
+    state = dating_bridge.get_admin_state_summary(유저.id, 유저.display_name)
+    msg = (
+        f"💖 **{유저.display_name}**님의 미연시 정보\n"
+        f"- 호감도: {state.get('affection', 0)}\n"
+        f"- 진행 일차: {state.get('current_day', 1)}일차\n"
+        f"- 관계단계: {state.get('relationship_stage', '어색한 친구')}\n"
+        f"- 배정된 인격: {state.get('assigned_personality', '기본')}\n"
+        f"- 엔딩: {state.get('ending_type', '없음') or '없음'}"
+    )
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@dating_group.command(name="초기화", description="특정 유저의 미연시 상태를 초기화합니다.")
+@app_commands.describe(유저="초기화할 유저")
+async def 미연시초기화(interaction: discord.Interaction, 유저: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild or not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다", ephemeral=True)
+        return
+
+    ok = dating_bridge.reset_state(유저.id)
+    if ok:
+        await interaction.followup.send(f"✅ {유저.display_name}님의 미연시 상태를 초기화했어!", ephemeral=True)
+    else:
+        await interaction.followup.send("초기화 중 에러가 났어... 😭", ephemeral=True)
+
+
+@bot.tree.command(name="캐시확인", description="일반 대화 캐시를 확인합니다.")
+@app_commands.describe(유저="확인할 유저")
+async def 캐시확인(interaction: discord.Interaction, 유저: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    affinity = affinity_manager.get_cached_affinity_only(유저.id)
+    rows = get_recent_user_inputs_cache(유저.display_name, limit=10)
+    if rows:
+        lines = []
+        for row in rows[-10:]:
+            lines.append(f"- {str(row)[:80]}")
+        history_text = "\n".join(lines)
+    else:
+        history_text = "없음"
+
+    msg = (
+        f"🧠 **{유저.display_name}**님의 일반 캐시 정보\n"
+        f"- 친밀도: {affinity}\n"
+        f"- 일반 대화 기록:\n{history_text}"
+    )
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+
+
+@db_group.command(name="불러오기", description="DB의 전체 데이터를 현재 캐시에 덮어씌웁니다.")
+async def db불러오기(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild or not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다", ephemeral=True)
+        return
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, db_admin_service.load_all_from_db_to_cache)
+    await interaction.followup.send(
+        f"✅ DB 불러오기 완료!\n- 친밀도: {result.get('affinity_rows', 0)}건\n- 일반 대화: {result.get('memory_rows', 0)}건",
+        ephemeral=True
+    )
+
+
+@db_group.command(name="저장하기", description="현재 캐시 전체를 DB에 덮어씌우고 캐시를 초기화합니다.")
+async def db저장하기(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild or not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("이 명령어는 관리자만 사용할 수 있습니다", ephemeral=True)
+        return
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, db_admin_service.save_all_cache_to_db_and_clear)
+    await interaction.followup.send(
+        f"✅ DB 저장하기 완료!\n- 친밀도 저장: {result.get('affinity_saved', 0)}건\n- 일반 대화 저장: {result.get('memory_saved', 0)}건\n- 캐시 초기화 완료",
+        ephemeral=True
+    )
+
 @bot.tree.command(name="모델", description="현재 뜌비봇이 사용 중인 모델 리스트와 우선순위를 확인합니다.")
 async def 모델확인(interaction: discord.Interaction):
     lines = []
@@ -339,5 +534,5 @@ async def 모델확인(interaction: discord.Interaction):
 
 
 if __name__ == "__main__":
-    Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": 8000}, daemon=True).start()
-    bot.run(TOKEN)
+    with contextlib.suppress(KeyboardInterrupt):
+        bot.run(TOKEN)

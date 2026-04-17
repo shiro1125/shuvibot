@@ -7,12 +7,17 @@ import discord
 
 import affinity_manager
 import affinity_rules
+import dating_bridge
 import personality
 from config import MAX_USER_MESSAGE_LEN, SHUVI_USER_ID
+import reaction_state
 from memory_service import get_memory_context, queue_memory_save
+import db_admin_service
 
 
 def should_respond(bot, message: discord.Message) -> bool:
+    if db_admin_service.is_globally_locked():
+        return False
     if message.author.bot or not bot.user:
         return False
     content = (message.content or "").strip()
@@ -20,6 +25,12 @@ def should_respond(bot, message: discord.Message) -> bool:
         return False
     if len(content) > MAX_USER_MESSAGE_LEN:
         return False
+
+    if not reaction_state.is_user_reaction_enabled(message.author.id):
+        return False
+    if message.guild is not None and not reaction_state.is_guild_reaction_enabled(message.guild.id):
+        return False
+
     return bot.user.mentioned_in(message) or "뜌비" in content
 
 
@@ -76,13 +87,17 @@ def build_system_instruction(user_id: int, user_name: str, current_personality: 
     is_shuvi = user_id == SHUVI_USER_ID
     personality_guide = personality.get_personality_guide(current_personality)
     attitude = affinity_manager.get_attitude_guide(affinity)
-    return personality.make_system_instruction(
+    system_instruction = personality.make_system_instruction(
         is_shuvi,
         user_name,
         current_personality,
         attitude,
         personality_guide,
     )
+    dating_override = dating_bridge.get_general_chat_override(user_id, user_name, affinity)
+    if dating_override:
+        system_instruction += "\n\n[미연시 연동 보정]\n" + dating_override
+    return system_instruction
 
 
 async def persist_after_response(
